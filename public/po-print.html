@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>采购单打印预览</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: "SimSun", "宋体", serif; font-size: 12px; color: #000; background: #f5f5f5; }
+    .page { width: 210mm; min-height: 297mm; margin: 10px auto; background: #fff; padding: 15mm 15mm 10mm 15mm; box-shadow: 0 0 10px rgba(0,0,0,.15); }
+
+    .company-header { text-align: center; margin-bottom: 8px; }
+    .company-name { font-size: 18px; font-weight: bold; letter-spacing: 2px; }
+    .company-name-en { font-size: 11px; color: #555; }
+    .company-info { font-size: 10px; color: #333; margin-top: 2px; }
+    .po-title { text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 8px; margin: 10px 0; border-bottom: 2px solid #000; padding-bottom: 5px; }
+
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-bottom: 10px; font-size: 12px; }
+    .info-grid .left, .info-grid .right { padding: 2px 0; }
+    .info-label { font-weight: bold; }
+
+    .product-line { font-size: 13px; font-weight: bold; margin: 8px 0; }
+
+    .items-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 11px; }
+    .items-table th, .items-table td { border: 1px solid #000; padding: 4px 6px; text-align: center; }
+    .items-table th { background: #e8e8e8; font-weight: bold; }
+    .items-table td.text-left { text-align: left; }
+    .items-table td.text-right { text-align: right; }
+    .items-table .total-row { font-weight: bold; background: #f0f0f0; }
+    .items-table .img-cell img { max-width: 60px; max-height: 40px; object-fit: contain; }
+
+    .terms { margin: 10px 0; font-size: 11px; line-height: 1.8; }
+    .terms ol { padding-left: 20px; }
+    .terms .notice { margin-top: 8px; border: 1px solid #999; padding: 6px 8px; font-size: 10px; line-height: 1.6; }
+    .terms .notice-title { font-weight: bold; margin-bottom: 2px; }
+
+    .payment-check { margin: 10px 0; font-size: 12px; }
+    .check-box { display: inline-block; width: 14px; height: 14px; border: 1px solid #000; text-align: center; line-height: 14px; font-size: 10px; vertical-align: middle; margin: 0 2px; }
+    .check-box.checked::after { content: "✓"; }
+
+    .signatures { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; margin-top: 20px; font-size: 12px; }
+    .sig-block { padding: 5px; }
+    .sig-label { font-weight: bold; }
+    .sig-line { border-bottom: 1px solid #000; height: 30px; margin-top: 5px; }
+
+    .toolbar { text-align: center; padding: 15px; background: #fff; position: sticky; top: 0; z-index: 10; box-shadow: 0 2px 5px rgba(0,0,0,.1); }
+    .toolbar button { padding: 8px 20px; margin: 0 5px; font-size: 14px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+    .toolbar button:hover { background: #f0f0f0; }
+    .toolbar .btn-print { background: #0d6efd; color: #fff; border-color: #0d6efd; }
+    .toolbar .btn-print:hover { background: #0b5ed7; }
+    .toolbar .btn-excel { background: #198754; color: #fff; border-color: #198754; }
+    .toolbar .btn-excel:hover { background: #157347; }
+    .toolbar .btn-back { background: #6c757d; color: #fff; border-color: #6c757d; }
+
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .page { margin: 0; padding: 10mm; box-shadow: none; width: 100%; min-height: auto; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="toolbar" id="toolbar">
+  <button class="btn-print" onclick="window.print()">🖨️ 打印</button>
+  <button class="btn-excel" onclick="exportExcel()">📊 导出Excel</button>
+  <button class="btn-back" onclick="history.back()">返回</button>
+  <span id="statusInfo" style="margin-left:15px; font-size:13px;"></span>
+</div>
+
+<div class="page" id="printPage">
+  <div class="company-header">
+    <div class="company-name" id="companyName">东莞兴信塑胶制品有限公司</div>
+    <div class="company-name-en">DONGGUAN XINGXIN PLASTIC PRODUCTS CO., LTD</div>
+    <div class="company-info">
+      地址：东莞市清溪镇上元管理区银坑路 &nbsp;&nbsp; TEL：0769-87388822 &nbsp;&nbsp; FAX：0769-87389933
+    </div>
+  </div>
+
+  <div class="po-title">采 购 单</div>
+
+  <div class="info-grid">
+    <div class="left">
+      <div><span class="info-label">供应商：</span><span id="supplierName"></span></div>
+      <div><span class="info-label">联络人：</span><span id="supplierContact"></span></div>
+      <div><span class="info-label">联系电话：</span><span id="supplierPhone"></span></div>
+    </div>
+    <div class="right">
+      <div><span class="info-label">订单编号：</span><span id="poNumber"></span></div>
+      <div><span class="info-label">联络人：</span><span id="ourContact"></span></div>
+      <div><span class="info-label">联系电话：</span><span id="ourPhone"></span></div>
+    </div>
+  </div>
+
+  <div class="product-line">产品名称：<span id="productName"></span></div>
+
+  <div id="itemsContainer"></div>
+
+  <div class="terms" id="termsSection"></div>
+
+  <div class="payment-check" id="paymentCheck"></div>
+
+  <div class="signatures">
+    <div class="sig-block"><div class="sig-label">供应商确认：</div><div class="sig-line"></div></div>
+    <div class="sig-block"><div class="sig-label">采购签核：</div><div class="sig-line"></div></div>
+    <div class="sig-block"><div class="sig-label">主管：</div><div class="sig-line"></div></div>
+    <div class="sig-block"><div class="sig-label">经理：</div><div class="sig-line"></div></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+var poData = null;
+
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var id = params.get('id');
+  if (!id) { document.getElementById('printPage').innerHTML = '<p style="text-align:center;padding:50px;font-size:16px;">缺少采购单ID参数</p>'; return; }
+
+  fetch('/api/purchase-orders/' + id)
+    .then(function(r) { if (!r.ok) throw new Error('加载失败'); return r.json(); })
+    .then(function(data) {
+      poData = data;
+      renderPO(data);
+    })
+    .catch(function(e) {
+      document.getElementById('printPage').innerHTML = '<p style="text-align:center;padding:50px;font-size:16px;color:red;">加载采购单失败：' + e.message + '</p>';
+    });
+})();
+
+function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+function renderPO(po) {
+  // Header info
+  if (po.group) {
+    var nameMap = { '兴信A': '东莞兴信塑胶制品有限公司', '兴信B': '东莞兴信塑胶制品有限公司', '华登': '东莞华登塑胶制品有限公司' };
+    document.getElementById('companyName').textContent = nameMap[po.group] || '东莞兴信塑胶制品有限公司';
+  }
+  document.getElementById('supplierName').textContent = po.supplier_name || '';
+  document.getElementById('supplierContact').textContent = po.supplier_contact || '';
+  document.getElementById('supplierPhone').textContent = po.supplier_phone || '';
+  document.getElementById('poNumber').textContent = po.po_number || '';
+  document.getElementById('ourContact').textContent = po.our_contact || '';
+  document.getElementById('ourPhone').textContent = po.our_phone || '';
+  document.getElementById('productName').textContent = po.product_name || '';
+
+  // Status badge
+  var statusEl = document.getElementById('statusInfo');
+  if (po.status === '已确认') {
+    statusEl.innerHTML = '<span style="color:green;font-weight:bold;">● 已确认</span>';
+  } else {
+    statusEl.innerHTML = '<span style="color:orange;font-weight:bold;">● 草稿</span>';
+  }
+
+  // Items table
+  var items = po.items || [];
+  var totalAmount = items.reduce(function(s, it) { return s + (Number(it.amount) || 0); }, 0);
+
+  var tableHtml = '<table class="items-table"><thead><tr>';
+  if (po.type === 'mold') {
+    tableHtml += '<th>序号</th><th>零件名称</th><th>材料</th><th>GATE</th><th>CAV/UP</th><th>单价</th><th>金额(RMB)</th><th>图片</th><th>备注</th>';
+  } else {
+    tableHtml += '<th>序号</th><th>产品名称</th><th>数量</th><th>单价</th><th>金额(RMB)</th><th>备注</th>';
+  }
+  tableHtml += '</tr></thead><tbody>';
+
+  items.forEach(function(it, i) {
+    tableHtml += '<tr>';
+    if (po.type === 'mold') {
+      tableHtml += '<td>' + (i + 1) + '</td>' +
+        '<td class="text-left">' + esc(it.part_name) + '</td>' +
+        '<td>' + esc(it.material) + '</td>' +
+        '<td>' + esc(it.gate) + '</td>' +
+        '<td>' + esc(it.cav_up) + '</td>' +
+        '<td class="text-right">' + (Number(it.unit_price) || 0).toLocaleString() + '</td>' +
+        '<td class="text-right">' + (Number(it.amount) || 0).toLocaleString() + '</td>' +
+        '<td class="img-cell">' + (it.image ? '<img src="' + esc(it.image) + '">' : '') + '</td>' +
+        '<td class="text-left">' + esc(it.notes) + '</td>';
+    } else {
+      tableHtml += '<td>' + (i + 1) + '</td>' +
+        '<td class="text-left">' + esc(it.product_name) + '</td>' +
+        '<td>' + (Number(it.quantity) || 0) + '</td>' +
+        '<td class="text-right">' + (Number(it.unit_price) || 0).toLocaleString() + '</td>' +
+        '<td class="text-right">' + (Number(it.amount) || 0).toLocaleString() + '</td>' +
+        '<td class="text-left">' + esc(it.notes) + '</td>';
+    }
+    tableHtml += '</tr>';
+  });
+
+  // Total row
+  var colspan = po.type === 'mold' ? 6 : 4;
+  tableHtml += '<tr class="total-row"><td colspan="' + colspan + '" style="text-align:right">合计：</td>';
+  tableHtml += '<td class="text-right">' + totalAmount.toLocaleString() + '</td>';
+  var extraCols = po.type === 'mold' ? 2 : 1;
+  tableHtml += '<td colspan="' + extraCols + '"></td></tr>';
+
+  tableHtml += '</tbody></table>';
+  document.getElementById('itemsContainer').innerHTML = tableHtml;
+
+  // Terms
+  var taxRate = po.tax_rate || 13;
+  var settleDays = po.settlement_days || 30;
+  var deliveryAddr = po.delivery_address || '东莞清溪上元管理区银坑路兴信厂';
+  var deliveryText = po.delivery_date_text || '';
+  var payTerms = po.payment_terms || '';
+
+  var now = new Date(po.created_at || Date.now());
+  var dateStr = now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日';
+
+  var termsHtml = '<ol>';
+  if (deliveryText) {
+    termsHtml += '<li>' + esc(deliveryText) + '</li>';
+  } else {
+    termsHtml += '<li>' + dateStr + '前交货，交货地址：' + esc(deliveryAddr) + '</li>';
+  }
+  if (payTerms) {
+    termsHtml += '<li>' + esc(payTerms) + '</li>';
+  } else {
+    termsHtml += '<li>单价已含 ' + taxRate + '% 增值税，月结 ' + settleDays + ' 天</li>';
+  }
+  termsHtml += '<li>货物及部件质量符合国外现行最新标准</li>';
+  termsHtml += '</ol>';
+
+  termsHtml += '<div class="notice">';
+  termsHtml += '<div class="notice-title">注意事项：</div>';
+  termsHtml += '1. 供应商须按订单要求按时保质保量交货，如有延误或质量问题，我司有权追究相关责任。<br>';
+  termsHtml += '2. 供应商在收到订单后，须在3个工作日内确认订单，逾期未确认视为接受。<br>';
+  termsHtml += '3. 如有任何变更，须双方书面确认后方可执行。<br>';
+  termsHtml += '4. 本订单一式两份，双方各执一份，具有同等法律效力。';
+  termsHtml += '</div>';
+
+  if (po.notes) {
+    termsHtml += '<div style="margin-top:8px"><strong>备注：</strong>' + esc(po.notes) + '</div>';
+  }
+
+  document.getElementById('termsSection').innerHTML = termsHtml;
+
+  // Payment check
+  var isCustomerPay = po.payment_type === '客付';
+  var isSelfPay = po.payment_type === '自付';
+  document.getElementById('paymentCheck').innerHTML =
+    '费用承担：客人付款 <span class="check-box' + (isCustomerPay ? ' checked' : '') + '"></span> ' +
+    '&nbsp;&nbsp;兴信自付 <span class="check-box' + (isSelfPay ? ' checked' : '') + '"></span>';
+}
+
+function exportExcel() {
+  if (!poData) return;
+  var po = poData;
+  var items = po.items || [];
+  var rows = [];
+
+  // Company header
+  var nameMap = { '兴信A': '东莞兴信塑胶制品有限公司', '兴信B': '东莞兴信塑胶制品有限公司', '华登': '东莞华登塑胶制品有限公司' };
+  rows.push([nameMap[po.group] || '东莞兴信塑胶制品有限公司']);
+  rows.push(['采购单']);
+  rows.push([]);
+
+  // Info
+  rows.push(['供应商：' + (po.supplier_name || ''), '', '', '订单编号：' + (po.po_number || '')]);
+  rows.push(['联络人：' + (po.supplier_contact || ''), '', '', '联络人：' + (po.our_contact || '')]);
+  rows.push(['联系电话：' + (po.supplier_phone || ''), '', '', '联系电话：' + (po.our_phone || '')]);
+  rows.push([]);
+  rows.push(['产品名称：' + (po.product_name || '')]);
+  rows.push([]);
+
+  // Items header + data
+  if (po.type === 'mold') {
+    rows.push(['序号', '零件名称', '材料', 'GATE', 'CAV/UP', '单价', '金额(RMB)', '备注']);
+    items.forEach(function(it, i) {
+      rows.push([i + 1, it.part_name || '', it.material || '', it.gate || '', it.cav_up || '', Number(it.unit_price) || 0, Number(it.amount) || 0, it.notes || '']);
+    });
+    var totalAmt = items.reduce(function(s, it) { return s + (Number(it.amount) || 0); }, 0);
+    rows.push(['', '', '', '', '合计：', '', totalAmt, '']);
+  } else {
+    rows.push(['序号', '产品名称', '数量', '单价', '金额(RMB)', '备注']);
+    items.forEach(function(it, i) {
+      rows.push([i + 1, it.product_name || '', Number(it.quantity) || 0, Number(it.unit_price) || 0, Number(it.amount) || 0, it.notes || '']);
+    });
+    var totalAmt = items.reduce(function(s, it) { return s + (Number(it.amount) || 0); }, 0);
+    rows.push(['', '', '', '合计：', totalAmt, '']);
+  }
+
+  rows.push([]);
+  var payType = po.payment_type === '客付' ? '客人付款 ☑  兴信自付 ☐' : (po.payment_type === '自付' ? '客人付款 ☐  兴信自付 ☑' : '');
+  rows.push(['费用承担：' + payType]);
+
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '采购单');
+  XLSX.writeFile(wb, (po.po_number || '采购单') + '.xlsx');
+}
+</script>
+</body>
+</html>
