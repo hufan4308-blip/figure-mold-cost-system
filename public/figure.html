@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>手办订单 - 采购订单系统</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-dark px-3">
+  <span class="navbar-brand"><i class="bi bi-gear-wide-connected"></i> 采购订单系统</span>
+  <div class="d-flex align-items-center gap-2">
+    <a href="mold.html" class="nav-link-custom">模具订单</a>
+    <a href="figure.html" class="nav-link-custom active">手办订单</a>
+    <span class="text-light ms-3" id="userBadge"></span>
+    <button class="btn btn-outline-light btn-sm" onclick="logout()">退出</button>
+  </div>
+</nav>
+
+<div class="container-fluid px-3 mt-3">
+  <!-- Tabs -->
+  <ul class="nav nav-tabs mb-3">
+    <li class="nav-item"><a class="nav-link active" href="#" onclick="switchTab('list')">订单列表</a></li>
+    <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('stats')">统计报表</a></li>
+    <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('po')">采购单</a></li>
+  </ul>
+
+  <!-- ═══ Tab 1: Order List ═══ -->
+  <div id="tabList">
+    <div class="filter-bar row g-2 mb-3 align-items-end">
+      <div class="col-auto">
+        <label>分组</label>
+        <select class="form-select form-select-sm" id="fGroup"><option value="">全部</option><option>兴信A</option><option>兴信B</option><option>华登</option></select>
+      </div>
+      <div class="col-auto">
+        <label>手办厂</label>
+        <select class="form-select form-select-sm" id="fFactory"><option value="">全部</option></select>
+      </div>
+      <div class="col-auto">
+        <label>客户</label>
+        <select class="form-select form-select-sm" id="fCustomer"><option value="">全部</option></select>
+      </div>
+      <div class="col-auto">
+        <label>状态</label>
+        <select class="form-select form-select-sm" id="fStatus"><option value="">全部</option><option>已下单</option><option>制作中</option><option>已完成</option></select>
+      </div>
+      <div class="col-auto">
+        <label>年份</label>
+        <select class="form-select form-select-sm" id="fYear"><option value="">全部</option></select>
+      </div>
+      <div class="col-auto">
+        <label>月份</label>
+        <select class="form-select form-select-sm" id="fMonth"><option value="">全部</option></select>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-sm btn-primary" onclick="loadOrders()"><i class="bi bi-search"></i> 查询</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="resetFilters()"><i class="bi bi-arrow-counterclockwise"></i> 重置</button>
+      </div>
+      <div class="col-auto ms-auto">
+        <button class="btn btn-sm btn-success" onclick="openNew()"><i class="bi bi-plus-lg"></i> 新建订单</button>
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered table-hover">
+        <thead class="table-dark">
+          <tr>
+            <th>序号</th><th>分组</th><th>客户</th><th>产品名称/编号</th><th>数量</th>
+            <th>手办费(RMB)</th><th>手办厂</th><th>下采购单时间</th>
+            <th>状态</th><th>付款方式</th><th>备注</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="orderBody"></tbody>
+      </table>
+    </div>
+    <div id="orderCount" class="text-muted small"></div>
+  </div>
+
+  <!-- ═══ Tab 2: Statistics ═══ -->
+  <div id="tabStats" style="display:none">
+    <div class="filter-bar row g-2 mb-3 align-items-end">
+      <div class="col-auto">
+        <label>年份</label>
+        <select class="form-select form-select-sm" id="sYear"></select>
+      </div>
+      <div class="col-auto">
+        <label>月份</label>
+        <select class="form-select form-select-sm" id="sMonth"><option value="">全部</option></select>
+      </div>
+      <div class="col-auto">
+        <label>分组</label>
+        <select class="form-select form-select-sm" id="sGroup"><option value="">全部</option><option>兴信A</option><option>兴信B</option><option>华登</option></select>
+      </div>
+      <div class="col-auto">
+        <label>维度</label>
+        <div class="btn-group btn-group-sm">
+          <input type="radio" class="btn-check" name="groupBy" id="byFactory" value="factory" checked>
+          <label class="btn btn-outline-primary" for="byFactory">按厂分</label>
+          <input type="radio" class="btn-check" name="groupBy" id="byCustomer" value="customer">
+          <label class="btn btn-outline-primary" for="byCustomer">按客分</label>
+        </div>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-sm btn-primary" onclick="loadStats()"><i class="bi bi-bar-chart"></i> 查询</button>
+      </div>
+      <div class="col-auto ms-auto">
+        <button class="btn btn-sm btn-success" onclick="exportStats()"><i class="bi bi-file-earmark-excel"></i> 导出Excel</button>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-4"><div class="stat-card bg-light border"><div class="stat-value text-primary" id="sTotalCount">0</div><div class="stat-label">总订单数</div></div></div>
+      <div class="col-md-4"><div class="stat-card bg-light border"><div class="stat-value text-info" id="sTotalQty">0</div><div class="stat-label">总数量</div></div></div>
+      <div class="col-md-4"><div class="stat-card bg-light border"><div class="stat-value text-success" id="sTotalFee">0</div><div class="stat-label">总金额(RMB)</div></div></div>
+    </div>
+
+    <div class="table-responsive mb-3">
+      <table class="table table-sm table-bordered">
+        <thead class="table-dark">
+          <tr><th>序号</th><th>名称</th><th>订单数</th><th>数量</th><th>总金额(RMB)</th><th>占比(%)</th></tr>
+        </thead>
+        <tbody id="statsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="row">
+      <div class="col-md-7"><canvas id="barChart" height="260"></canvas></div>
+      <div class="col-md-5"><canvas id="pieChart" height="260"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ═══ Tab 3: Purchase Orders ═══ -->
+  <div id="tabPO" style="display:none">
+    <div class="filter-bar row g-2 mb-3 align-items-end">
+      <div class="col-auto">
+        <label>状态</label>
+        <select class="form-select form-select-sm" id="poFStatus"><option value="">全部</option><option>草稿</option><option>已确认</option></select>
+      </div>
+      <div class="col-auto">
+        <label>年份</label>
+        <select class="form-select form-select-sm" id="poFYear"><option value="">全部</option></select>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-sm btn-primary" onclick="loadPOs()"><i class="bi bi-search"></i> 查询</button>
+      </div>
+      <div class="col-auto ms-auto">
+        <button class="btn btn-sm btn-success" onclick="openNewPO()"><i class="bi bi-plus-lg"></i> 新建采购单</button>
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered table-hover">
+        <thead class="table-dark">
+          <tr>
+            <th>采购单编号</th><th>分组</th><th>供应商</th><th>产品名称</th>
+            <th>明细数</th><th>合计金额</th><th>状态</th><th>创建时间</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="poBody"></tbody>
+      </table>
+    </div>
+    <div id="poCount" class="text-muted small"></div>
+  </div>
+</div>
+
+<!-- Create/Edit Modal -->
+<div class="modal fade" id="figModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalTitle">新建手办订单</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="m-id">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">分组 *</label>
+            <select class="form-select" id="m-group"><option value="">请选择</option><option>兴信A</option><option>兴信B</option><option>华登</option></select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">客户 *</label>
+            <input type="text" class="form-control" id="m-customer" list="customerList" placeholder="输入客户名称">
+            <datalist id="customerList"></datalist>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">产品名称/编号</label>
+            <input type="text" class="form-control" id="m-product_name">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">数量</label>
+            <input type="number" class="form-control" id="m-quantity" min="0">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">手办费(RMB)</label>
+            <input type="number" class="form-control" id="m-figure_fee" min="0" step="0.01">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">手办厂 *</label>
+            <select class="form-select" id="m-figure_factory"><option value="">请选择</option></select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">下采购单时间</label>
+            <input type="date" class="form-control" id="m-order_date">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">付款方式</label>
+            <select class="form-select" id="m-payment_type"><option value="">请选择</option><option>客付</option><option>自付</option><option>现金</option></select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">备注</label>
+            <input type="text" class="form-control" id="m-notes">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="saveOrder()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PO Create/Edit Modal -->
+<div class="modal fade" id="poModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="poModalTitle">新建手办采购单</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="po-id">
+        <div class="row g-3 mb-3">
+          <div class="col-md-3">
+            <label class="form-label">采购单编号 *</label>
+            <input type="text" class="form-control" id="po-po_number">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">分组 *</label>
+            <select class="form-select" id="po-group"><option value="">请选择</option><option>兴信A</option><option>兴信B</option><option>华登</option></select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">产品名称 *</label>
+            <input type="text" class="form-control" id="po-product_name">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">费用承担 *</label>
+            <select class="form-select" id="po-payment_type"><option value="">请选择</option><option>客付</option><option>自付</option></select>
+          </div>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-md-4">
+            <label class="form-label">供应商（手办厂） *</label>
+            <select class="form-select" id="po-supplier_name"><option value="">请选择</option></select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">供应商联络人</label>
+            <input type="text" class="form-control" id="po-supplier_contact">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">供应商电话</label>
+            <input type="text" class="form-control" id="po-supplier_phone">
+          </div>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-md-4">
+            <label class="form-label">我方联络人</label>
+            <input type="text" class="form-control" id="po-our_contact">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">交货地址</label>
+            <input type="text" class="form-control" id="po-delivery_address" value="东莞清溪上元管理区银坑路兴信厂">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">付款方式</label>
+            <input type="text" class="form-control" id="po-payment_terms" value="月结30天">
+          </div>
+        </div>
+
+        <hr>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong>手办明细</strong>
+          <button class="btn btn-sm btn-outline-primary" onclick="addPoItem()"><i class="bi bi-plus"></i> 添加行</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered">
+            <thead class="table-light">
+              <tr>
+                <th style="width:40px">序号</th>
+                <th>产品名称</th>
+                <th style="width:100px">数量</th>
+                <th style="width:100px">单价</th>
+                <th style="width:120px">金额(RMB)</th>
+                <th>备注</th>
+                <th style="width:40px"></th>
+              </tr>
+            </thead>
+            <tbody id="poItemsBody"></tbody>
+            <tfoot>
+              <tr class="table-secondary fw-bold">
+                <td colspan="4" class="text-end">合计：</td>
+                <td id="poTotalAmount">0</td>
+                <td colspan="2"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="savePO()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container">
+  <div id="toast" class="toast align-items-center text-white border-0" role="alert">
+    <div class="d-flex"><div class="toast-body" id="toastMsg"></div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="utils.js"></script>
+<script>
+// ─── Auth ────────────────────────────────────────────────────────────
+var currentUser = sessionStorage.getItem('user');
+if (!currentUser) window.location.href = 'index.html';
+document.getElementById('userBadge').textContent = currentUser;
+
+function logout() { sessionStorage.removeItem('user'); window.location.href = 'index.html'; }
+function headers() { return { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(currentUser) }; }
+
+// ─── Init ────────────────────────────────────────────────────────────
+var allOrders = [];
+var barChart = null, pieChart = null;
+
+initPage();
+
+function initPage() {
+  var curYear = new Date().getFullYear();
+  ['fYear', 'sYear'].forEach(function(id) {
+    var sel = document.getElementById(id);
+    for (var y = curYear; y >= 2024; y--) {
+      var opt = document.createElement('option');
+      opt.value = y; opt.textContent = y + '年';
+      sel.appendChild(opt);
+    }
+  });
+  ['fMonth', 'sMonth'].forEach(function(id) {
+    var sel = document.getElementById(id);
+    for (var m = 1; m <= 12; m++) {
+      var opt = document.createElement('option');
+      opt.value = String(m).padStart(2, '0'); opt.textContent = m + '月';
+      sel.appendChild(opt);
+    }
+  });
+
+  var poYSel = document.getElementById('poFYear');
+  for (var y = curYear; y >= 2024; y--) {
+    var opt = document.createElement('option');
+    opt.value = y; opt.textContent = y + '年';
+    poYSel.appendChild(opt);
+  }
+
+  fetch('/api/factories').then(function(r) { return r.json(); }).then(function(d) {
+    var fSel = document.getElementById('fFactory');
+    var mSel = document.getElementById('m-figure_factory');
+    (d.figure_factories || []).forEach(function(f) {
+      fSel.innerHTML += '<option>' + esc(f) + '</option>';
+      mSel.innerHTML += '<option>' + esc(f) + '</option>';
+    });
+    var poSup = document.getElementById('po-supplier_name');
+    (d.figure_factories || []).forEach(function(f) {
+      poSup.innerHTML += '<option>' + esc(f) + '</option>';
+    });
+  });
+
+  loadCustomers();
+  loadOrders();
+}
+
+function loadCustomers() {
+  fetch('/api/customers').then(function(r) { return r.json(); }).then(function(custs) {
+    var fSel = document.getElementById('fCustomer');
+    fSel.innerHTML = '<option value="">全部</option>';
+    var dl = document.getElementById('customerList');
+    dl.innerHTML = '';
+    custs.forEach(function(c) {
+      fSel.innerHTML += '<option>' + esc(c) + '</option>';
+      dl.innerHTML += '<option value="' + esc(c) + '">';
+    });
+  });
+}
+
+// ─── Tab Switch ──────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.nav-tabs .nav-link').forEach(function(el, i) {
+    el.classList.toggle('active', (tab === 'list' && i === 0) || (tab === 'stats' && i === 1) || (tab === 'po' && i === 2));
+  });
+  document.getElementById('tabList').style.display = tab === 'list' ? '' : 'none';
+  document.getElementById('tabStats').style.display = tab === 'stats' ? '' : 'none';
+  document.getElementById('tabPO').style.display = tab === 'po' ? '' : 'none';
+  if (tab === 'stats') loadStats();
+  if (tab === 'po') loadPOs();
+}
+
+// ─── Order List ──────────────────────────────────────────────────────
+function loadOrders() {
+  var params = new URLSearchParams();
+  var g = document.getElementById('fGroup').value; if (g) params.set('group', g);
+  var f = document.getElementById('fFactory').value; if (f) params.set('factory', f);
+  var c = document.getElementById('fCustomer').value; if (c) params.set('customer', c);
+  var s = document.getElementById('fStatus').value; if (s) params.set('status', s);
+  var y = document.getElementById('fYear').value; if (y) params.set('year', y);
+  var m = document.getElementById('fMonth').value; if (m) params.set('month', m);
+
+  fetch('/api/figure-orders?' + params.toString())
+    .then(function(r) { return r.json(); })
+    .then(function(orders) {
+      allOrders = orders;
+      renderTable(orders);
+    });
+}
+
+function renderTable(orders) {
+  if (!orders.length) {
+    document.getElementById('orderBody').innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4"><i class="bi bi-inbox" style="font-size:2rem"></i><br>暂无订单数据</td></tr>';
+    document.getElementById('orderCount').textContent = '';
+    return;
+  }
+  var html = orders.map(function(o, i) {
+    var nextBtn = '';
+    var trans = { '已下单': '制作中', '制作中': '已完成' };
+    if (trans[o.status]) {
+      nextBtn = '<button class="btn btn-sm btn-outline-success" title="推进到' + trans[o.status] + '" onclick="advanceStatus(' + o.id + ',\'' + trans[o.status] + '\')"><i class="bi bi-arrow-right-circle"></i></button>';
+    }
+    return '<tr>' +
+      '<td>' + (i + 1) + '</td>' +
+      '<td>' + esc(o.group) + '</td>' +
+      '<td>' + esc(o.customer) + '</td>' +
+      '<td>' + esc(o.product_name) + '</td>' +
+      '<td>' + (o.quantity || 0) + '</td>' +
+      '<td>' + (o.figure_fee || 0).toLocaleString() + '</td>' +
+      '<td>' + esc(o.figure_factory) + '</td>' +
+      '<td>' + fmtDate(o.order_date) + '</td>' +
+      '<td><span class="badge ' + statusBadgeClass(o.status) + '">' + esc(o.status) + '</span></td>' +
+      '<td>' + esc(o.payment_type) + '</td>' +
+      '<td>' + esc(o.notes) + '</td>' +
+      '<td class="text-nowrap">' +
+        '<button class="btn btn-sm btn-outline-primary" onclick="editOrder(' + o.id + ')"><i class="bi bi-pencil"></i></button> ' +
+        '<button class="btn btn-sm btn-outline-danger" onclick="deleteOrder(' + o.id + ')"><i class="bi bi-trash"></i></button> ' +
+        nextBtn +
+      '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('orderBody').innerHTML = html;
+  document.getElementById('orderCount').textContent = '共 ' + orders.length + ' 条记录';
+}
+
+function resetFilters() {
+  ['fGroup', 'fFactory', 'fCustomer', 'fStatus', 'fYear', 'fMonth'].forEach(function(id) {
+    document.getElementById(id).value = '';
+  });
+  loadOrders();
+}
+
+// ─── CRUD ────────────────────────────────────────────────────────────
+var figFields = ['group', 'customer', 'product_name', 'quantity', 'figure_fee', 'figure_factory', 'order_date', 'payment_type', 'notes'];
+
+function openNew() {
+  document.getElementById('m-id').value = '';
+  document.getElementById('modalTitle').textContent = '新建手办订单';
+  figFields.forEach(function(f) { document.getElementById('m-' + f).value = ''; });
+  document.getElementById('m-order_date').value = new Date().toISOString().substring(0, 10);
+  new bootstrap.Modal(document.getElementById('figModal')).show();
+}
+
+function editOrder(id) {
+  var o = allOrders.find(function(x) { return x.id === id; });
+  if (!o) return;
+  document.getElementById('m-id').value = o.id;
+  document.getElementById('modalTitle').textContent = '编辑手办订单';
+  figFields.forEach(function(f) {
+    document.getElementById('m-' + f).value = o[f] || '';
+  });
+  new bootstrap.Modal(document.getElementById('figModal')).show();
+}
+
+function saveOrder() {
+  var id = document.getElementById('m-id').value;
+  var body = {};
+  figFields.forEach(function(f) { body[f] = document.getElementById('m-' + f).value; });
+  if (!body.group || !body.customer || !body.figure_factory) {
+    showToast('请填写分组、客户和手办厂', 'danger');
+    return;
+  }
+  var url = id ? '/api/figure-orders/' + id : '/api/figure-orders';
+  var method = id ? 'PUT' : 'POST';
+  fetch(url, { method: method, headers: headers(), body: JSON.stringify(body) })
+    .then(function(r) { if (!r.ok) throw new Error('保存失败'); return r.json(); })
+    .then(function() {
+      bootstrap.Modal.getInstance(document.getElementById('figModal')).hide();
+      showToast('保存成功');
+      loadOrders();
+      loadCustomers();
+    })
+    .catch(function(e) { showToast(e.message, 'danger'); });
+}
+
+function deleteOrder(id) {
+  if (!confirm('确定删除此订单？')) return;
+  fetch('/api/figure-orders/' + id, { method: 'DELETE', headers: headers() })
+    .then(function(r) { if (!r.ok) throw new Error('删除失败'); return r.json(); })
+    .then(function() { showToast('已删除'); loadOrders(); })
+    .catch(function(e) { showToast(e.message, 'danger'); });
+}
+
+function advanceStatus(id, newStatus) {
+  if (!confirm('确定将状态更新为 "' + newStatus + '"？')) return;
+  fetch('/api/figure-orders/' + id + '/status', {
+    method: 'PUT',
+    headers: headers(),
+    body: JSON.stringify({ status: newStatus })
+  })
+    .then(function(r) { if (!r.ok) throw new Error('状态更新失败'); return r.json(); })
+    .then(function() { showToast('状态已更新'); loadOrders(); })
+    .catch(function(e) { showToast(e.message, 'danger'); });
+}
+
+// ─── Statistics ──────────────────────────────────────────────────────
+function loadStats() {
+  var params = new URLSearchParams();
+  var y = document.getElementById('sYear').value; if (y) params.set('year', y);
+  var m = document.getElementById('sMonth').value; if (m) params.set('month', m);
+  var g = document.getElementById('sGroup').value; if (g) params.set('group', g);
+  var gb = document.querySelector('input[name="groupBy"]:checked').value;
+  params.set('group_by', gb);
+
+  fetch('/api/figure-orders/stats?' + params.toString())
+    .then(function(r) { return r.json(); })
+    .then(function(stats) {
+      renderStatsCards(stats);
+      renderStatsTable(stats);
+      renderCharts(stats);
+    });
+}
+
+function renderStatsCards(stats) {
+  document.getElementById('sTotalCount').textContent = stats.total_count;
+  document.getElementById('sTotalQty').textContent = stats.total_qty;
+  document.getElementById('sTotalFee').textContent = stats.total_fee.toLocaleString();
+}
+
+function renderStatsTable(stats) {
+  var total = stats.total_fee || 1;
+  var rows = stats.summary.map(function(s, i) {
+    return '<tr><td>' + (i + 1) + '</td><td>' + esc(s.name) + '</td><td>' + s.count + '</td><td>' + s.qty + '</td><td>' + s.total_fee.toLocaleString() + '</td><td>' + (s.total_fee / total * 100).toFixed(1) + '%</td></tr>';
+  }).join('');
+  rows += '<tr class="table-dark fw-bold"><td colspan="2">合计</td><td>' + stats.total_count + '</td><td>' + stats.total_qty + '</td><td>' + stats.total_fee.toLocaleString() + '</td><td>100%</td></tr>';
+  document.getElementById('statsBody').innerHTML = rows;
+}
+
+function renderCharts(stats) {
+  if (barChart) barChart.destroy();
+  var barCtx = document.getElementById('barChart').getContext('2d');
+  barChart = new Chart(barCtx, {
+    type: 'bar',
+    data: {
+      labels: stats.monthly.map(function(m) { return m.month; }),
+      datasets: [{
+        label: '手办费(RMB)',
+        data: stats.monthly.map(function(m) { return m.total_fee; }),
+        backgroundColor: 'rgba(255, 159, 64, 0.7)'
+      }]
+    },
+    options: { responsive: true, plugins: { title: { display: true, text: '每月手办费趋势' } } }
+  });
+
+  if (pieChart) pieChart.destroy();
+  var pieCtx = document.getElementById('pieChart').getContext('2d');
+  var colors = ['#FF6384','#36A2EB','#FFCE56','#4BC0C0','#9966FF','#FF9F40','#C9CBCF','#7BC8A4'];
+  pieChart = new Chart(pieCtx, {
+    type: 'pie',
+    data: {
+      labels: stats.summary.map(function(s) { return s.name; }),
+      datasets: [{ data: stats.summary.map(function(s) { return s.total_fee; }), backgroundColor: colors.slice(0, stats.summary.length) }]
+    },
+    options: { responsive: true, plugins: { title: { display: true, text: '费用占比' } } }
+  });
+}
+
+// ─── Excel Export ────────────────────────────────────────────────────
+function exportStats() {
+  var rows = [['序号', '名称', '订单数', '数量', '总金额(RMB)', '占比']];
+  document.querySelectorAll('#statsBody tr').forEach(function(tr) {
+    var cells = [];
+    tr.querySelectorAll('td').forEach(function(td) { cells.push(td.textContent.trim()); });
+    rows.push(cells);
+  });
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '手办统计');
+  var year = document.getElementById('sYear').value || '全部';
+  XLSX.writeFile(wb, '手办统计_' + year + '.xlsx');
+}
+
+// ─── Purchase Orders ────────────────────────────────────────────────
+var allPOs = [];
+var poItems = [];
+
+function loadPOs() {
+  var params = new URLSearchParams();
+  params.set('type', 'figure');
+  var s = document.getElementById('poFStatus').value; if (s) params.set('status', s);
+  var y = document.getElementById('poFYear').value; if (y) params.set('year', y);
+
+  fetch('/api/purchase-orders?' + params.toString())
+    .then(function(r) { return r.json(); })
+    .then(function(pos) {
+      allPOs = pos;
+      renderPOTable(pos);
+    });
+}
+
+function renderPOTable(pos) {
+  if (!pos.length) {
+    document.getElementById('poBody').innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4"><i class="bi bi-inbox" style="font-size:2rem"></i><br>暂无采购单</td></tr>';
+    document.getElementById('poCount').textContent = '';
+    return;
+  }
+  var html = pos.map(function(p) {
+    var totalAmt = (p.items || []).reduce(function(s, it) { return s + (Number(it.amount) || 0); }, 0);
+    var statusCls = p.status === '已确认' ? 'bg-success' : 'bg-secondary';
+    return '<tr>' +
+      '<td>' + esc(p.po_number) + '</td>' +
+      '<td>' + esc(p.group) + '</td>' +
+      '<td>' + esc(p.supplier_name) + '</td>' +
+      '<td>' + esc(p.product_name) + '</td>' +
+      '<td>' + (p.items || []).length + '</td>' +
+      '<td>' + totalAmt.toLocaleString() + '</td>' +
+      '<td><span class="badge ' + statusCls + '">' + esc(p.status) + '</span></td>' +
+      '<td>' + fmtDate(p.created_at) + '</td>' +
+      '<td class="text-nowrap">' +
+        '<a href="po-print.html?id=' + p.id + '" target="_blank" class="btn btn-sm btn-outline-info" title="打印预览"><i class="bi bi-printer"></i></a> ' +
+        '<button class="btn btn-sm btn-outline-primary" onclick="editPO(' + p.id + ')"><i class="bi bi-pencil"></i></button> ' +
+        '<button class="btn btn-sm btn-outline-danger" onclick="deletePO(' + p.id + ')"><i class="bi bi-trash"></i></button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('poBody').innerHTML = html;
+  document.getElementById('poCount').textContent = '共 ' + pos.length + ' 张采购单';
+}
+
+function openNewPO() {
+  document.getElementById('po-id').value = '';
+  document.getElementById('poModalTitle').textContent = '新建手办采购单';
+  ['po_number','group','product_name','payment_type','supplier_name','supplier_contact','supplier_phone','our_contact'].forEach(function(f) {
+    document.getElementById('po-' + f).value = '';
+  });
+  document.getElementById('po-delivery_address').value = '东莞清溪上元管理区银坑路兴信厂';
+  document.getElementById('po-payment_terms').value = '月结30天';
+  fetch('/api/purchase-orders/next-number?type=figure')
+    .then(function(r) { return r.json(); })
+    .then(function(d) { document.getElementById('po-po_number').value = d.po_number; });
+  document.getElementById('po-our_contact').value = currentUser;
+  poItems = [{ product_name: '', quantity: '', unit_price: '', amount: '', notes: '' }];
+  renderPoItems();
+  new bootstrap.Modal(document.getElementById('poModal')).show();
+}
+
+function editPO(id) {
+  var p = allPOs.find(function(x) { return x.id === id; });
+  if (!p) return;
+  document.getElementById('po-id').value = p.id;
+  document.getElementById('poModalTitle').textContent = '编辑手办采购单';
+  ['po_number','group','product_name','payment_type','supplier_name','supplier_contact','supplier_phone','our_contact','delivery_address','payment_terms'].forEach(function(f) {
+    document.getElementById('po-' + f).value = p[f] || '';
+  });
+  poItems = (p.items || []).map(function(it) { return Object.assign({}, it); });
+  if (!poItems.length) poItems = [{ product_name: '', quantity: '', unit_price: '', amount: '', notes: '' }];
+  renderPoItems();
+  new bootstrap.Modal(document.getElementById('poModal')).show();
+}
+
+function addPoItem() {
+  syncPoItemsFromDOM();
+  poItems.push({ product_name: '', quantity: '', unit_price: '', amount: '', notes: '' });
+  renderPoItems();
+}
+
+function removePoItem(idx) {
+  syncPoItemsFromDOM();
+  poItems.splice(idx, 1);
+  if (poItems.length === 0) poItems.push({ product_name: '', quantity: '', unit_price: '', amount: '', notes: '' });
+  renderPoItems();
+}
+
+function renderPoItems() {
+  var html = poItems.map(function(it, i) {
+    return '<tr>' +
+      '<td>' + (i + 1) + '</td>' +
+      '<td><input type="text" class="form-control form-control-sm po-item" data-idx="' + i + '" data-field="product_name" value="' + esc(it.product_name || '') + '"></td>' +
+      '<td><input type="number" class="form-control form-control-sm po-item" data-idx="' + i + '" data-field="quantity" value="' + (it.quantity || '') + '"></td>' +
+      '<td><input type="number" class="form-control form-control-sm po-item" data-idx="' + i + '" data-field="unit_price" value="' + (it.unit_price || '') + '" onchange="calcPoTotal()"></td>' +
+      '<td><input type="number" class="form-control form-control-sm po-item" data-idx="' + i + '" data-field="amount" value="' + (it.amount || '') + '" onchange="calcPoTotal()"></td>' +
+      '<td><input type="text" class="form-control form-control-sm po-item" data-idx="' + i + '" data-field="notes" value="' + esc(it.notes || '') + '"></td>' +
+      '<td><button class="btn btn-sm btn-outline-danger" onclick="removePoItem(' + i + ')"><i class="bi bi-x"></i></button></td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('poItemsBody').innerHTML = html;
+  calcPoTotal();
+}
+
+function syncPoItemsFromDOM() {
+  document.querySelectorAll('.po-item').forEach(function(el) {
+    var idx = Number(el.dataset.idx);
+    var field = el.dataset.field;
+    if (poItems[idx]) poItems[idx][field] = el.value;
+  });
+}
+
+function calcPoTotal() {
+  var total = 0;
+  document.querySelectorAll('.po-item[data-field="amount"]').forEach(function(el) {
+    total += Number(el.value) || 0;
+  });
+  document.getElementById('poTotalAmount').textContent = total.toLocaleString();
+}
+
+function savePO() {
+  syncPoItemsFromDOM();
+  var id = document.getElementById('po-id').value;
+  var body = {
+    type: 'figure',
+    po_number: document.getElementById('po-po_number').value,
+    group: document.getElementById('po-group').value,
+    product_name: document.getElementById('po-product_name').value,
+    payment_type: document.getElementById('po-payment_type').value,
+    supplier_name: document.getElementById('po-supplier_name').value,
+    supplier_contact: document.getElementById('po-supplier_contact').value,
+    supplier_phone: document.getElementById('po-supplier_phone').value,
+    our_contact: document.getElementById('po-our_contact').value,
+    delivery_address: document.getElementById('po-delivery_address').value,
+    payment_terms: document.getElementById('po-payment_terms').value,
+    items: poItems.filter(function(it) { return it.product_name; })
+  };
+  if (!body.po_number || !body.group || !body.supplier_name) {
+    showToast('请填写采购单编号、分组和供应商', 'danger');
+    return;
+  }
+  var url = id ? '/api/purchase-orders/' + id : '/api/purchase-orders';
+  var method = id ? 'PUT' : 'POST';
+  fetch(url, { method: method, headers: headers(), body: JSON.stringify(body) })
+    .then(function(r) { if (!r.ok) throw new Error('保存失败'); return r.json(); })
+    .then(function() {
+      bootstrap.Modal.getInstance(document.getElementById('poModal')).hide();
+      showToast('采购单已保存');
+      loadPOs();
+    })
+    .catch(function(e) { showToast(e.message, 'danger'); });
+}
+
+function deletePO(id) {
+  if (!confirm('确定删除此采购单？')) return;
+  fetch('/api/purchase-orders/' + id, { method: 'DELETE', headers: headers() })
+    .then(function(r) { if (!r.ok) throw new Error('删除失败'); return r.json(); })
+    .then(function() { showToast('已删除'); loadPOs(); })
+    .catch(function(e) { showToast(e.message, 'danger'); });
+}
+
+setInterval(loadOrders, 30000);
+</script>
+</body>
+</html>
