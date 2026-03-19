@@ -1,0 +1,49 @@
+/* ─── 全局 ─────────────────────────────────────────────────────────────── */
+body { font-family: 'Microsoft YaHei', '微软雅黑', sans-serif; }
+.navbar { background: #1a3a6c !important; }
+.navbar-brand { font-weight: bold; font-size: 1.1rem; }
+
+/* ─── 导航 ──────────────────────────────────────────────────────────────── */
+.nav-link-custom { font-size: .9rem; padding: 6px 12px; border-radius: 6px; text-decoration: none; color: rgba(255,255,255,.85); }
+.nav-link-custom:hover { color: #fff; background: rgba(255,255,255,.15); }
+.nav-link-custom.active { color: #fff; background: rgba(255,255,255,.25); }
+
+/* ─── 表格 ──────────────────────────────────────────────────────────────── */
+.table-sm td, .table-sm th { padding: 0.3rem 0.5rem; vertical-align: middle; }
+.table th { white-space: nowrap; font-size: .85rem; }
+.table td { font-size: .85rem; }
+
+/* ─── 筛选栏 ────────────────────────────────────────────────────────────── */
+.filter-bar .form-select, .filter-bar .form-control { font-size: .85rem; }
+.filter-bar label { font-size: .82rem; color: #6c757d; }
+
+/* ─── 状态徽章 ─────────────────────────────────────────────────────────── */
+.badge { font-size: .78rem; }
+
+/* ─── 模态框 ────────────────────────────────────────────────────────────── */
+.modal .form-label { font-size: .85rem; font-weight: 500; }
+.modal .form-control, .modal .form-select { font-size: .85rem; }
+
+/* ─── 统计卡片 ─────────────────────────────────────────────────────────── */
+.stat-card { border-radius: 10px; text-align: center; padding: 16px; }
+.stat-card .stat-value { font-size: 1.6rem; font-weight: bold; }
+.stat-card .stat-label { font-size: .82rem; color: #6c757d; }
+
+/* ─── Toast ─────────────────────────────────────────────────────────────── */
+.toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; }
+
+/* ─── 空状态 ─────────────────────────────────────────────────────────────── */
+.empty-state { text-align: center; padding: 60px 20px; color: #adb5bd; }
+.empty-state i { font-size: 3rem; }
+
+/* ─── 打印 ──────────────────────────────────────────────────────────────── */
+@media print {
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-size: 11pt; margin: 0; }
+  .no-print { display: none !important; }
+  .navbar, .filter-bar, .btn { display: none !important; }
+}
+
+/* ─── 登录页 ────────────────────────────────────────────────────────────── */
+.login-card { max-width: 380px; margin: 120px auto; }
+.login-header { background: #1a3a6c; color: #fff; text-align: center; padding: 24px; border-radius: 8px 8px 0 0; }

@@ -108,7 +108,8 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="utils.js"></script>
 <script>
 var poData = null;
 
@@ -117,14 +118,14 @@ var poData = null;
   var id = params.get('id');
   if (!id) { document.getElementById('printPage').innerHTML = '<p style="text-align:center;padding:50px;font-size:16px;">缺少采购单ID参数</p>'; return; }
 
-  fetch('/api/purchase-orders/' + id)
+  authFetch('/api/purchase-orders/' + id)
     .then(function(r) { if (!r.ok) throw new Error('加载失败'); return r.json(); })
     .then(function(data) {
       poData = data;
       renderPO(data);
     })
     .catch(function(e) {
-      document.getElementById('printPage').innerHTML = '<p style="text-align:center;padding:50px;font-size:16px;color:red;">加载采购单失败：' + e.message + '</p>';
+      document.getElementById('printPage').textContent = '加载采购单失败：' + e.message;
     });
 })();
 

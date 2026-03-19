@@ -4,9 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>手办订单 - 采购订单系统</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="vendor/bootstrap.min.css" rel="stylesheet">
+  <link href="vendor/bootstrap-icons.min.css" rel="stylesheet">
   <link href="style.css" rel="stylesheet">
+  <style>
+    .factory-header {
+      background: #ED7D31; color: #fff; font-weight: bold; font-size: 1rem;
+      padding: 6px 12px; cursor: pointer; user-select: none;
+    }
+    .factory-header:hover { opacity: .9; }
+    .factory-header .badge { font-size: .75rem; margin-left: 8px; }
+    .factory-subtotal { background: #FCE4CC; font-weight: bold; }
+    .order-row { cursor: pointer; }
+    .order-row:hover { background: #fff7f0 !important; }
+    .factory-colors-0 { background: #ED7D31; }
+    .factory-colors-1 { background: #4472C4; }
+    .factory-colors-2 { background: #70AD47; }
+    .factory-colors-3 { background: #FFC000; color: #333; }
+    .factory-colors-4 { background: #5B9BD5; }
+    .factory-colors-5 { background: #9B59B6; }
+    .factory-colors-6 { background: #264478; }
+    .factory-colors-7 { background: #A5A5A5; }
+    .po-detail-card { border-left: 4px solid #ED7D31; background: #f8f9fa; padding: 16px; margin-bottom: 12px; }
+    .po-detail-card h6 { margin-bottom: 12px; color: #1a3a6c; }
+  </style>
 </head>
 <body>
 
@@ -22,23 +43,18 @@
 </nav>
 
 <div class="container-fluid px-3 mt-3">
-  <!-- Tabs -->
+  <!-- Tabs: only 2 -->
   <ul class="nav nav-tabs mb-3">
     <li class="nav-item"><a class="nav-link active" href="#" onclick="switchTab('list')">订单列表</a></li>
     <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('stats')">统计报表</a></li>
-    <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('po')">采购单</a></li>
   </ul>
 
-  <!-- ═══ Tab 1: Order List ═══ -->
+  <!-- ═══ Tab 1: Order List (grouped by factory) ═══ -->
   <div id="tabList">
     <div class="filter-bar row g-2 mb-3 align-items-end">
       <div class="col-auto">
         <label>分组</label>
-        <select class="form-select form-select-sm" id="fGroup"><option value="">全部</option><option>兴信A</option><option>兴信B</option><option>华登</option></select>
-      </div>
-      <div class="col-auto">
-        <label>手办厂</label>
-        <select class="form-select form-select-sm" id="fFactory"><option value="">全部</option></select>
+        <select class="form-select form-select-sm" id="fGroup"><option value="">全部</option><option>A车间</option><option>B车间</option><option>华登车间</option></select>
       </div>
       <div class="col-auto">
         <label>客户</label>
@@ -61,23 +77,34 @@
         <button class="btn btn-sm btn-outline-secondary" onclick="resetFilters()"><i class="bi bi-arrow-counterclockwise"></i> 重置</button>
       </div>
       <div class="col-auto ms-auto">
-        <button class="btn btn-sm btn-success" onclick="openNew()"><i class="bi bi-plus-lg"></i> 新建订单</button>
+        <button class="btn btn-sm btn-success" onclick="triggerImport()"><i class="bi bi-file-earmark-arrow-up"></i> 导入采购单</button>
+        <input type="file" id="importFile" accept=".xlsx,.xls" multiple style="display:none" onchange="importExcel(this)">
+        <button class="btn btn-sm btn-outline-success" onclick="openNewPO()"><i class="bi bi-plus-lg"></i> 新建采购单</button>
+        <button class="btn btn-sm btn-outline-primary" onclick="openNew()"><i class="bi bi-plus"></i> 手动添加</button>
       </div>
     </div>
 
+    <!-- Factory-grouped table -->
     <div class="table-responsive">
-      <table class="table table-sm table-bordered table-hover">
+      <table class="table table-sm table-bordered mb-0" id="mainTable">
         <thead class="table-dark">
           <tr>
-            <th>序号</th><th>分组</th><th>客户</th><th>产品名称/编号</th><th>数量</th>
-            <th>手办费(RMB)</th><th>手办厂</th><th>下采购单时间</th>
-            <th>状态</th><th>付款方式</th><th>备注</th><th>操作</th>
+            <th style="width:50px">序号</th>
+            <th>客户</th>
+            <th>产品名称/编号</th>
+            <th>数量</th>
+            <th>手办费(RMB)</th>
+            <th>下单时间</th>
+            <th>状态</th>
+            <th>付款方式</th>
+            <th>备注</th>
+            <th style="width:100px">操作</th>
           </tr>
         </thead>
         <tbody id="orderBody"></tbody>
       </table>
     </div>
-    <div id="orderCount" class="text-muted small"></div>
+    <div id="orderCount" class="text-muted small mt-2"></div>
   </div>
 
   <!-- ═══ Tab 2: Statistics ═══ -->
@@ -92,16 +119,14 @@
         <select class="form-select form-select-sm" id="sMonth"><option value="">全部</option></select>
       </div>
       <div class="col-auto">
-        <label>分组</label>
-        <select class="form-select form-select-sm" id="sGroup"><option value="">全部</option><option>兴信A</option><option>兴信B</option><option>华登</option></select>
-      </div>
-      <div class="col-auto">
         <label>维度</label>
         <div class="btn-group btn-group-sm">
           <input type="radio" class="btn-check" name="groupBy" id="byFactory" value="factory" checked>
           <label class="btn btn-outline-primary" for="byFactory">按厂分</label>
           <input type="radio" class="btn-check" name="groupBy" id="byCustomer" value="customer">
           <label class="btn btn-outline-primary" for="byCustomer">按客分</label>
+          <input type="radio" class="btn-check" name="groupBy" id="byWorkshop" value="workshop">
+          <label class="btn btn-outline-primary" for="byWorkshop">按车间分</label>
         </div>
       </div>
       <div class="col-auto">
@@ -132,42 +157,9 @@
       <div class="col-md-5"><canvas id="pieChart" height="260"></canvas></div>
     </div>
   </div>
-
-  <!-- ═══ Tab 3: Purchase Orders ═══ -->
-  <div id="tabPO" style="display:none">
-    <div class="filter-bar row g-2 mb-3 align-items-end">
-      <div class="col-auto">
-        <label>状态</label>
-        <select class="form-select form-select-sm" id="poFStatus"><option value="">全部</option><option>草稿</option><option>已确认</option></select>
-      </div>
-      <div class="col-auto">
-        <label>年份</label>
-        <select class="form-select form-select-sm" id="poFYear"><option value="">全部</option></select>
-      </div>
-      <div class="col-auto">
-        <button class="btn btn-sm btn-primary" onclick="loadPOs()"><i class="bi bi-search"></i> 查询</button>
-      </div>
-      <div class="col-auto ms-auto">
-        <button class="btn btn-sm btn-success" onclick="openNewPO()"><i class="bi bi-plus-lg"></i> 新建采购单</button>
-      </div>
-    </div>
-
-    <div class="table-responsive">
-      <table class="table table-sm table-bordered table-hover">
-        <thead class="table-dark">
-          <tr>
-            <th>采购单编号</th><th>分组</th><th>供应商</th><th>产品名称</th>
-            <th>明细数</th><th>合计金额</th><th>状态</th><th>创建时间</th><th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="poBody"></tbody>
-      </table>
-    </div>
-    <div id="poCount" class="text-muted small"></div>
-  </div>
 </div>
 
-<!-- Create/Edit Modal -->
+<!-- Create/Edit Order Modal (manual add) -->
 <div class="modal fade" id="figModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
@@ -180,12 +172,15 @@
         <div class="row g-3">
           <div class="col-md-4">
             <label class="form-label">分组 *</label>
-            <select class="form-select" id="m-group"><option value="">请选择</option><option>兴信A</option><option>兴信B</option><option>华登</option></select>
+            <select class="form-select" id="m-group"><option value="">请选择</option><option>A车间</option><option>B车间</option><option>华登车间</option></select>
           </div>
           <div class="col-md-4">
             <label class="form-label">客户 *</label>
-            <input type="text" class="form-control" id="m-customer" list="customerList" placeholder="输入客户名称">
-            <datalist id="customerList"></datalist>
+            <select class="form-select" id="m-customer"><option value="">请选择客户</option></select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">手办厂 *</label>
+            <select class="form-select" id="m-figure_factory"><option value="">请选择</option></select>
           </div>
           <div class="col-md-4">
             <label class="form-label">产品名称/编号</label>
@@ -198,10 +193,6 @@
           <div class="col-md-4">
             <label class="form-label">手办费(RMB)</label>
             <input type="number" class="form-control" id="m-figure_fee" min="0" step="0.01">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label">手办厂 *</label>
-            <select class="form-select" id="m-figure_factory"><option value="">请选择</option></select>
           </div>
           <div class="col-md-4">
             <label class="form-label">下采购单时间</label>
@@ -225,6 +216,22 @@
   </div>
 </div>
 
+<!-- Order Detail Modal (shows linked PO) -->
+<div class="modal fade" id="detailModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="detailTitle">订单详情</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="detailBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- PO Create/Edit Modal -->
 <div class="modal fade" id="poModal" tabindex="-1">
   <div class="modal-dialog modal-xl">
@@ -242,7 +249,7 @@
           </div>
           <div class="col-md-3">
             <label class="form-label">分组 *</label>
-            <select class="form-select" id="po-group"><option value="">请选择</option><option>兴信A</option><option>兴信B</option><option>华登</option></select>
+            <select class="form-select" id="po-group"><option value="">请选择</option><option>A车间</option><option>B车间</option><option>华登车间</option></select>
           </div>
           <div class="col-md-3">
             <label class="form-label">产品名称 *</label>
@@ -313,7 +320,69 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-        <button class="btn btn-primary" onclick="savePO()">保存</button>
+        <button class="btn btn-primary" onclick="savePO()">保存并确认</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Import Preview Modal (batch) -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header bg-success text-white">
+        <h5 class="modal-title"><i class="bi bi-file-earmark-arrow-up"></i> 批量导入采购单</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="importLoading" class="text-center py-4" style="display:none">
+          <div class="spinner-border text-primary"></div>
+          <div class="mt-2">正在解析Excel文件... <span id="importProgress"></span></div>
+        </div>
+        <div id="importPreview" style="display:none">
+          <div class="row g-2 mb-3 align-items-end">
+            <div class="col-auto">
+              <label class="form-label mb-1">批量设置车间</label>
+              <select class="form-select form-select-sm" id="imp-batch-group" onchange="batchSetField('group',this.value)"><option value="">--</option><option>A车间</option><option>B车间</option><option>华登车间</option></select>
+            </div>
+            <div class="col-auto">
+              <label class="form-label mb-1">批量设置客户</label>
+              <select class="form-select form-select-sm" id="imp-batch-customer" onchange="batchSetField('customer',this.value)"><option value="">--</option></select>
+            </div>
+            <div class="col-auto">
+              <label class="form-label mb-1">批量设置费用承担</label>
+              <select class="form-select form-select-sm" id="imp-batch-payment" onchange="batchSetField('payment',this.value)"><option value="">--</option><option>客付</option><option>自付</option></select>
+            </div>
+            <div class="col-auto ms-auto">
+              <span class="badge bg-primary" id="imp-file-count"></span>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle" id="impBatchTable">
+              <thead class="table-dark">
+                <tr>
+                  <th style="width:30px"><input type="checkbox" checked onchange="toggleAllImport(this)"></th>
+                  <th>文件名</th>
+                  <th>采购单号</th>
+                  <th>供应商</th>
+                  <th>产品</th>
+                  <th>明细</th>
+                  <th>金额</th>
+                  <th>客户 *</th>
+                  <th>车间 *</th>
+                  <th>费用承担</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody id="impBatchBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="importError" class="alert alert-danger" style="display:none"></div>
+      </div>
+      <div class="modal-footer" id="importFooter" style="display:none">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-success" onclick="confirmBatchImport()"><i class="bi bi-check-circle"></i> 全部导入</button>
       </div>
     </div>
   </div>
@@ -326,22 +395,21 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="vendor/bootstrap.bundle.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
 <script src="utils.js"></script>
 <script>
 // ─── Auth ────────────────────────────────────────────────────────────
+authCheck();
 var currentUser = sessionStorage.getItem('user');
-if (!currentUser) window.location.href = 'index.html';
 document.getElementById('userBadge').textContent = currentUser;
-
-function logout() { sessionStorage.removeItem('user'); window.location.href = 'index.html'; }
-function headers() { return { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(currentUser) }; }
 
 // ─── Init ────────────────────────────────────────────────────────────
 var allOrders = [];
+var allPOs = [];
 var barChart = null, pieChart = null;
+var factoryOrder = [];
 
 initPage();
 
@@ -364,22 +432,14 @@ function initPage() {
     }
   });
 
-  var poYSel = document.getElementById('poFYear');
-  for (var y = curYear; y >= 2024; y--) {
-    var opt = document.createElement('option');
-    opt.value = y; opt.textContent = y + '年';
-    poYSel.appendChild(opt);
-  }
-
-  fetch('/api/factories').then(function(r) { return r.json(); }).then(function(d) {
-    var fSel = document.getElementById('fFactory');
+  authFetch('/api/factories').then(function(r) { return r.json(); }).then(function(d) {
+    factoryOrder = d.figure_factories || [];
     var mSel = document.getElementById('m-figure_factory');
-    (d.figure_factories || []).forEach(function(f) {
-      fSel.innerHTML += '<option>' + esc(f) + '</option>';
+    factoryOrder.forEach(function(f) {
       mSel.innerHTML += '<option>' + esc(f) + '</option>';
     });
     var poSup = document.getElementById('po-supplier_name');
-    (d.figure_factories || []).forEach(function(f) {
+    factoryOrder.forEach(function(f) {
       poSup.innerHTML += '<option>' + esc(f) + '</option>';
     });
   });
@@ -389,14 +449,14 @@ function initPage() {
 }
 
 function loadCustomers() {
-  fetch('/api/customers').then(function(r) { return r.json(); }).then(function(custs) {
+  authFetch('/api/customers').then(function(r) { return r.json(); }).then(function(custs) {
     var fSel = document.getElementById('fCustomer');
     fSel.innerHTML = '<option value="">全部</option>';
-    var dl = document.getElementById('customerList');
-    dl.innerHTML = '';
+    var mSel = document.getElementById('m-customer');
+    mSel.innerHTML = '<option value="">请选择客户</option>';
     custs.forEach(function(c) {
       fSel.innerHTML += '<option>' + esc(c) + '</option>';
-      dl.innerHTML += '<option value="' + esc(c) + '">';
+      mSel.innerHTML += '<option value="' + esc(c) + '">' + esc(c) + '</option>';
     });
   });
 }
@@ -404,73 +464,208 @@ function loadCustomers() {
 // ─── Tab Switch ──────────────────────────────────────────────────────
 function switchTab(tab) {
   document.querySelectorAll('.nav-tabs .nav-link').forEach(function(el, i) {
-    el.classList.toggle('active', (tab === 'list' && i === 0) || (tab === 'stats' && i === 1) || (tab === 'po' && i === 2));
+    el.classList.toggle('active', (tab === 'list' && i === 0) || (tab === 'stats' && i === 1));
   });
   document.getElementById('tabList').style.display = tab === 'list' ? '' : 'none';
   document.getElementById('tabStats').style.display = tab === 'stats' ? '' : 'none';
-  document.getElementById('tabPO').style.display = tab === 'po' ? '' : 'none';
   if (tab === 'stats') loadStats();
-  if (tab === 'po') loadPOs();
 }
 
-// ─── Order List ──────────────────────────────────────────────────────
+// ─── Order List (grouped by factory) ─────────────────────────────────
 function loadOrders() {
   var params = new URLSearchParams();
   var g = document.getElementById('fGroup').value; if (g) params.set('group', g);
-  var f = document.getElementById('fFactory').value; if (f) params.set('factory', f);
   var c = document.getElementById('fCustomer').value; if (c) params.set('customer', c);
   var s = document.getElementById('fStatus').value; if (s) params.set('status', s);
   var y = document.getElementById('fYear').value; if (y) params.set('year', y);
   var m = document.getElementById('fMonth').value; if (m) params.set('month', m);
 
-  fetch('/api/figure-orders?' + params.toString())
+  authFetch('/api/figure-orders?' + params.toString())
     .then(function(r) { return r.json(); })
     .then(function(orders) {
       allOrders = orders;
-      renderTable(orders);
+      authFetch('/api/purchase-orders?type=figure')
+        .then(function(r) { return r.json(); })
+        .then(function(pos) { allPOs = pos; });
+      renderGroupedTable(orders);
     });
 }
 
-function renderTable(orders) {
+function renderGroupedTable(orders) {
   if (!orders.length) {
-    document.getElementById('orderBody').innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4"><i class="bi bi-inbox" style="font-size:2rem"></i><br>暂无订单数据</td></tr>';
+    document.getElementById('orderBody').innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4"><i class="bi bi-inbox" style="font-size:2rem"></i><br>暂无订单数据<br><small>点击「导入采购单」导入订单</small></td></tr>';
     document.getElementById('orderCount').textContent = '';
     return;
   }
-  var html = orders.map(function(o, i) {
-    var nextBtn = '';
-    var trans = { '已下单': '制作中', '制作中': '已完成' };
-    if (trans[o.status]) {
-      nextBtn = '<button class="btn btn-sm btn-outline-success" title="推进到' + trans[o.status] + '" onclick="advanceStatus(' + o.id + ',\'' + trans[o.status] + '\')"><i class="bi bi-arrow-right-circle"></i></button>';
-    }
-    return '<tr>' +
-      '<td>' + (i + 1) + '</td>' +
-      '<td>' + esc(o.group) + '</td>' +
-      '<td>' + esc(o.customer) + '</td>' +
-      '<td>' + esc(o.product_name) + '</td>' +
-      '<td>' + (o.quantity || 0) + '</td>' +
-      '<td>' + (o.figure_fee || 0).toLocaleString() + '</td>' +
-      '<td>' + esc(o.figure_factory) + '</td>' +
-      '<td>' + fmtDate(o.order_date) + '</td>' +
-      '<td><span class="badge ' + statusBadgeClass(o.status) + '">' + esc(o.status) + '</span></td>' +
-      '<td>' + esc(o.payment_type) + '</td>' +
-      '<td>' + esc(o.notes) + '</td>' +
-      '<td class="text-nowrap">' +
-        '<button class="btn btn-sm btn-outline-primary" onclick="editOrder(' + o.id + ')"><i class="bi bi-pencil"></i></button> ' +
-        '<button class="btn btn-sm btn-outline-danger" onclick="deleteOrder(' + o.id + ')"><i class="bi bi-trash"></i></button> ' +
-        nextBtn +
-      '</td>' +
-    '</tr>';
-  }).join('');
+
+  // Group by figure_factory
+  var groups = {};
+  orders.forEach(function(o) {
+    var factory = o.figure_factory || '未分配';
+    if (!groups[factory]) groups[factory] = [];
+    groups[factory].push(o);
+  });
+
+  // Sort: follow factoryOrder first
+  var sortedFactories = [];
+  factoryOrder.forEach(function(f) { if (groups[f]) sortedFactories.push(f); });
+  Object.keys(groups).forEach(function(f) { if (sortedFactories.indexOf(f) === -1) sortedFactories.push(f); });
+
+  var html = '';
+  var globalIdx = 0;
+  var grandTotal = 0;
+  var grandQty = 0;
+
+  sortedFactories.forEach(function(factory, fi) {
+    var factoryOrders = groups[factory];
+    var colorClass = 'factory-colors-' + (fi % 8);
+    var subtotalFee = 0;
+    var subtotalQty = 0;
+
+    factoryOrders.forEach(function(o) {
+      subtotalFee += (o.figure_fee || 0);
+      subtotalQty += (o.quantity || 0);
+    });
+    grandTotal += subtotalFee;
+    grandQty += subtotalQty;
+
+    // Factory header row
+    html += '<tr class="factory-header ' + colorClass + '" onclick="toggleFactory(this)">' +
+      '<td colspan="10">' +
+        '<i class="bi bi-chevron-down me-2"></i>' + esc(factory) +
+        '<span class="badge bg-light text-dark">' + factoryOrders.length + ' 条</span>' +
+        '<span class="badge bg-light text-dark ms-1">合计: ¥' + subtotalFee.toLocaleString() + '</span>' +
+      '</td></tr>';
+
+    // Order rows
+    factoryOrders.forEach(function(o) {
+      globalIdx++;
+      var statusHtml = '<span class="badge ' + statusBadgeClass(o.status) + '">' + esc(o.status) + '</span>';
+      var hasPoIcon = o.from_po_id ? ' <i class="bi bi-link-45deg text-primary" title="关联采购单"></i>' : '';
+
+      html += '<tr class="order-row" onclick="showDetail(' + o.id + ')" title="点击查看详情">' +
+        '<td>' + globalIdx + '</td>' +
+        '<td>' + esc(o.customer) + '</td>' +
+        '<td>' + esc(o.product_name) + hasPoIcon + '</td>' +
+        '<td>' + (o.quantity || '') + '</td>' +
+        '<td>' + (o.figure_fee ? '¥' + o.figure_fee.toLocaleString() : '') + '</td>' +
+        '<td>' + fmtDate(o.order_date) + '</td>' +
+        '<td>' + statusHtml + '</td>' +
+        '<td>' + esc(o.payment_type) + '</td>' +
+        '<td>' + esc(o.notes) + '</td>' +
+        '<td class="text-nowrap" onclick="event.stopPropagation()">' +
+          '<button class="btn btn-sm btn-outline-primary" onclick="editOrder(' + o.id + ')" title="编辑"><i class="bi bi-pencil"></i></button> ' +
+          '<button class="btn btn-sm btn-outline-danger" onclick="deleteOrder(' + o.id + ')" title="删除"><i class="bi bi-trash"></i></button>' +
+        '</td>' +
+      '</tr>';
+    });
+
+    // Subtotal row
+    html += '<tr class="factory-subtotal">' +
+      '<td colspan="3" class="text-end">小计（' + esc(factory) + '）：</td>' +
+      '<td>' + subtotalQty + '</td>' +
+      '<td>¥' + subtotalFee.toLocaleString() + '</td>' +
+      '<td colspan="5"></td></tr>';
+  });
+
+  // Grand total
+  html += '<tr class="table-dark fw-bold">' +
+    '<td colspan="3" class="text-end">总计：</td>' +
+    '<td>' + grandQty + '</td>' +
+    '<td>¥' + grandTotal.toLocaleString() + '</td>' +
+    '<td colspan="5"></td></tr>';
+
   document.getElementById('orderBody').innerHTML = html;
-  document.getElementById('orderCount').textContent = '共 ' + orders.length + ' 条记录';
+  document.getElementById('orderCount').textContent = '共 ' + orders.length + ' 条记录，' + sortedFactories.length + ' 个手办厂';
+}
+
+function toggleFactory(headerRow) {
+  var nextRow = headerRow.nextElementSibling;
+  while (nextRow && !nextRow.classList.contains('factory-header')) {
+    nextRow.style.display = nextRow.style.display === 'none' ? '' : 'none';
+    nextRow = nextRow.nextElementSibling;
+  }
+  var icon = headerRow.querySelector('i');
+  if (icon.classList.contains('bi-chevron-down')) {
+    icon.classList.replace('bi-chevron-down', 'bi-chevron-right');
+  } else {
+    icon.classList.replace('bi-chevron-right', 'bi-chevron-down');
+  }
 }
 
 function resetFilters() {
-  ['fGroup', 'fFactory', 'fCustomer', 'fStatus', 'fYear', 'fMonth'].forEach(function(id) {
+  ['fGroup', 'fCustomer', 'fStatus', 'fYear', 'fMonth'].forEach(function(id) {
     document.getElementById(id).value = '';
   });
   loadOrders();
+}
+
+// ─── Show Order Detail (with linked PO) ──────────────────────────────
+function showDetail(orderId) {
+  var o = allOrders.find(function(x) { return x.id === orderId; });
+  if (!o) return;
+
+  var html = '<div class="row g-3 mb-3">';
+  html += '<div class="col-md-3"><strong>客户：</strong> ' + esc(o.customer) + '</div>';
+  html += '<div class="col-md-3"><strong>手办厂：</strong> ' + esc(o.figure_factory) + '</div>';
+  html += '<div class="col-md-3"><strong>分组：</strong> ' + esc(o.group) + '</div>';
+  html += '<div class="col-md-3"><strong>状态：</strong> <span class="badge ' + statusBadgeClass(o.status) + '">' + esc(o.status) + '</span></div>';
+  html += '</div>';
+
+  html += '<div class="row g-3 mb-3">';
+  html += '<div class="col-md-3"><strong>产品名称：</strong> ' + esc(o.product_name) + '</div>';
+  html += '<div class="col-md-3"><strong>数量：</strong> ' + (o.quantity || 0) + '</div>';
+  html += '<div class="col-md-3"><strong>手办费：</strong> ¥' + (o.figure_fee || 0).toLocaleString() + '</div>';
+  html += '<div class="col-md-3"><strong>下单时间：</strong> ' + fmtDate(o.order_date) + '</div>';
+  html += '</div>';
+
+  if (o.notes) {
+    html += '<div class="mb-3"><strong>备注：</strong> ' + esc(o.notes) + '</div>';
+  }
+
+  // Show linked PO
+  if (o.from_po_id) {
+    var po = allPOs.find(function(p) { return p.id === o.from_po_id; });
+    if (po) {
+      html += '<hr>';
+      html += '<div class="po-detail-card">';
+      html += '<h6><i class="bi bi-file-earmark-text"></i> 关联采购单: ' + esc(po.po_number) + ' <span class="badge ' + (po.status === '已确认' ? 'bg-success' : 'bg-secondary') + '">' + esc(po.status) + '</span>';
+      html += ' <a href="po-print.html?id=' + po.id + '" target="_blank" class="btn btn-sm btn-outline-info ms-2"><i class="bi bi-printer"></i> 打印</a>';
+      html += '</h6>';
+
+      html += '<div class="row g-2 mb-2">';
+      html += '<div class="col-md-3"><small class="text-muted">供应商：</small> ' + esc(po.supplier_name) + '</div>';
+      html += '<div class="col-md-3"><small class="text-muted">联络人：</small> ' + esc(po.supplier_contact) + '</div>';
+      html += '<div class="col-md-3"><small class="text-muted">费用承担：</small> ' + esc(po.payment_type) + '</div>';
+      html += '<div class="col-md-3"><small class="text-muted">创建时间：</small> ' + fmtDate(po.created_at) + '</div>';
+      html += '</div>';
+
+      if (po.items && po.items.length) {
+        html += '<table class="table table-sm table-bordered mt-2 mb-0">';
+        html += '<thead class="table-light"><tr><th>序号</th><th>产品名称</th><th>性质</th><th>数量</th><th>单价</th><th>金额(RMB)</th><th>备注</th></tr></thead><tbody>';
+        var totalAmt = 0;
+        po.items.forEach(function(it, i) {
+          totalAmt += Number(it.amount) || 0;
+          html += '<tr><td>' + (i + 1) + '</td><td>' + esc(it.product_name || it.part_name || '') + '</td><td>' + esc(it.nature || '') + '</td><td>' + (it.quantity || '') + '</td><td>' + (it.unit_price || '') + '</td><td>' + (it.amount ? Number(it.amount).toLocaleString() : '') + '</td><td>' + esc(it.notes || '') + '</td></tr>';
+        });
+        html += '<tr class="table-secondary fw-bold"><td colspan="5" class="text-end">合计：</td><td>¥' + totalAmt.toLocaleString() + '</td><td></td></tr>';
+        html += '</tbody></table>';
+      }
+      html += '</div>';
+    }
+  }
+
+  // Status advancement
+  var trans = { '已下单': '制作中', '制作中': '已完成' };
+  if (trans[o.status]) {
+    html += '<div class="mt-3 text-end">';
+    html += '<button class="btn btn-success" onclick="advanceStatus(' + o.id + ',\'' + trans[o.status] + '\')"><i class="bi bi-arrow-right-circle"></i> 推进到「' + trans[o.status] + '」</button>';
+    html += '</div>';
+  }
+
+  document.getElementById('detailTitle').textContent = '订单详情 - ' + (o.product_name || '');
+  document.getElementById('detailBody').innerHTML = html;
+  new bootstrap.Modal(document.getElementById('detailModal')).show();
 }
 
 // ─── CRUD ────────────────────────────────────────────────────────────
@@ -489,9 +684,7 @@ function editOrder(id) {
   if (!o) return;
   document.getElementById('m-id').value = o.id;
   document.getElementById('modalTitle').textContent = '编辑手办订单';
-  figFields.forEach(function(f) {
-    document.getElementById('m-' + f).value = o[f] || '';
-  });
+  figFields.forEach(function(f) { document.getElementById('m-' + f).value = o[f] || ''; });
   new bootstrap.Modal(document.getElementById('figModal')).show();
 }
 
@@ -505,7 +698,7 @@ function saveOrder() {
   }
   var url = id ? '/api/figure-orders/' + id : '/api/figure-orders';
   var method = id ? 'PUT' : 'POST';
-  fetch(url, { method: method, headers: headers(), body: JSON.stringify(body) })
+  fetch(url, { method: method, headers: authHeaders(), body: JSON.stringify(body) })
     .then(function(r) { if (!r.ok) throw new Error('保存失败'); return r.json(); })
     .then(function() {
       bootstrap.Modal.getInstance(document.getElementById('figModal')).hide();
@@ -518,7 +711,7 @@ function saveOrder() {
 
 function deleteOrder(id) {
   if (!confirm('确定删除此订单？')) return;
-  fetch('/api/figure-orders/' + id, { method: 'DELETE', headers: headers() })
+  authFetch('/api/figure-orders/' + id, { method: 'DELETE', headers: authHeaders() })
     .then(function(r) { if (!r.ok) throw new Error('删除失败'); return r.json(); })
     .then(function() { showToast('已删除'); loadOrders(); })
     .catch(function(e) { showToast(e.message, 'danger'); });
@@ -526,13 +719,16 @@ function deleteOrder(id) {
 
 function advanceStatus(id, newStatus) {
   if (!confirm('确定将状态更新为 "' + newStatus + '"？')) return;
-  fetch('/api/figure-orders/' + id + '/status', {
-    method: 'PUT',
-    headers: headers(),
-    body: JSON.stringify({ status: newStatus })
+  authFetch('/api/figure-orders/' + id + '/status', {
+    method: 'PUT', headers: authHeaders(), body: JSON.stringify({ status: newStatus })
   })
     .then(function(r) { if (!r.ok) throw new Error('状态更新失败'); return r.json(); })
-    .then(function() { showToast('状态已更新'); loadOrders(); })
+    .then(function() {
+      showToast('状态已更新');
+      var detailModal = bootstrap.Modal.getInstance(document.getElementById('detailModal'));
+      if (detailModal) detailModal.hide();
+      loadOrders();
+    })
     .catch(function(e) { showToast(e.message, 'danger'); });
 }
 
@@ -541,11 +737,10 @@ function loadStats() {
   var params = new URLSearchParams();
   var y = document.getElementById('sYear').value; if (y) params.set('year', y);
   var m = document.getElementById('sMonth').value; if (m) params.set('month', m);
-  var g = document.getElementById('sGroup').value; if (g) params.set('group', g);
   var gb = document.querySelector('input[name="groupBy"]:checked').value;
   params.set('group_by', gb);
 
-  fetch('/api/figure-orders/stats?' + params.toString())
+  authFetch('/api/figure-orders/stats?' + params.toString())
     .then(function(r) { return r.json(); })
     .then(function(stats) {
       renderStatsCards(stats);
@@ -563,9 +758,9 @@ function renderStatsCards(stats) {
 function renderStatsTable(stats) {
   var total = stats.total_fee || 1;
   var rows = stats.summary.map(function(s, i) {
-    return '<tr><td>' + (i + 1) + '</td><td>' + esc(s.name) + '</td><td>' + s.count + '</td><td>' + s.qty + '</td><td>' + s.total_fee.toLocaleString() + '</td><td>' + (s.total_fee / total * 100).toFixed(1) + '%</td></tr>';
+    return '<tr><td>' + (i + 1) + '</td><td>' + esc(s.name) + '</td><td>' + s.count + '</td><td>' + (s.qty || 0) + '</td><td>' + s.total_fee.toLocaleString() + '</td><td>' + (s.total_fee / total * 100).toFixed(1) + '%</td></tr>';
   }).join('');
-  rows += '<tr class="table-dark fw-bold"><td colspan="2">合计</td><td>' + stats.total_count + '</td><td>' + stats.total_qty + '</td><td>' + stats.total_fee.toLocaleString() + '</td><td>100%</td></tr>';
+  rows += '<tr class="table-dark fw-bold"><td colspan="2">合计</td><td>' + stats.total_count + '</td><td>' + (stats.total_qty || 0) + '</td><td>' + stats.total_fee.toLocaleString() + '</td><td>100%</td></tr>';
   document.getElementById('statsBody').innerHTML = rows;
 }
 
@@ -613,52 +808,8 @@ function exportStats() {
   XLSX.writeFile(wb, '手办统计_' + year + '.xlsx');
 }
 
-// ─── Purchase Orders ────────────────────────────────────────────────
-var allPOs = [];
+// ─── Purchase Orders (integrated) ───────────────────────────────────
 var poItems = [];
-
-function loadPOs() {
-  var params = new URLSearchParams();
-  params.set('type', 'figure');
-  var s = document.getElementById('poFStatus').value; if (s) params.set('status', s);
-  var y = document.getElementById('poFYear').value; if (y) params.set('year', y);
-
-  fetch('/api/purchase-orders?' + params.toString())
-    .then(function(r) { return r.json(); })
-    .then(function(pos) {
-      allPOs = pos;
-      renderPOTable(pos);
-    });
-}
-
-function renderPOTable(pos) {
-  if (!pos.length) {
-    document.getElementById('poBody').innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4"><i class="bi bi-inbox" style="font-size:2rem"></i><br>暂无采购单</td></tr>';
-    document.getElementById('poCount').textContent = '';
-    return;
-  }
-  var html = pos.map(function(p) {
-    var totalAmt = (p.items || []).reduce(function(s, it) { return s + (Number(it.amount) || 0); }, 0);
-    var statusCls = p.status === '已确认' ? 'bg-success' : 'bg-secondary';
-    return '<tr>' +
-      '<td>' + esc(p.po_number) + '</td>' +
-      '<td>' + esc(p.group) + '</td>' +
-      '<td>' + esc(p.supplier_name) + '</td>' +
-      '<td>' + esc(p.product_name) + '</td>' +
-      '<td>' + (p.items || []).length + '</td>' +
-      '<td>' + totalAmt.toLocaleString() + '</td>' +
-      '<td><span class="badge ' + statusCls + '">' + esc(p.status) + '</span></td>' +
-      '<td>' + fmtDate(p.created_at) + '</td>' +
-      '<td class="text-nowrap">' +
-        '<a href="po-print.html?id=' + p.id + '" target="_blank" class="btn btn-sm btn-outline-info" title="打印预览"><i class="bi bi-printer"></i></a> ' +
-        '<button class="btn btn-sm btn-outline-primary" onclick="editPO(' + p.id + ')"><i class="bi bi-pencil"></i></button> ' +
-        '<button class="btn btn-sm btn-outline-danger" onclick="deletePO(' + p.id + ')"><i class="bi bi-trash"></i></button>' +
-      '</td>' +
-    '</tr>';
-  }).join('');
-  document.getElementById('poBody').innerHTML = html;
-  document.getElementById('poCount').textContent = '共 ' + pos.length + ' 张采购单';
-}
 
 function openNewPO() {
   document.getElementById('po-id').value = '';
@@ -668,25 +819,11 @@ function openNewPO() {
   });
   document.getElementById('po-delivery_address').value = '东莞清溪上元管理区银坑路兴信厂';
   document.getElementById('po-payment_terms').value = '月结30天';
-  fetch('/api/purchase-orders/next-number?type=figure')
+  authFetch('/api/purchase-orders/next-number?type=figure')
     .then(function(r) { return r.json(); })
     .then(function(d) { document.getElementById('po-po_number').value = d.po_number; });
   document.getElementById('po-our_contact').value = currentUser;
   poItems = [{ product_name: '', quantity: '', unit_price: '', amount: '', notes: '' }];
-  renderPoItems();
-  new bootstrap.Modal(document.getElementById('poModal')).show();
-}
-
-function editPO(id) {
-  var p = allPOs.find(function(x) { return x.id === id; });
-  if (!p) return;
-  document.getElementById('po-id').value = p.id;
-  document.getElementById('poModalTitle').textContent = '编辑手办采购单';
-  ['po_number','group','product_name','payment_type','supplier_name','supplier_contact','supplier_phone','our_contact','delivery_address','payment_terms'].forEach(function(f) {
-    document.getElementById('po-' + f).value = p[f] || '';
-  });
-  poItems = (p.items || []).map(function(it) { return Object.assign({}, it); });
-  if (!poItems.length) poItems = [{ product_name: '', quantity: '', unit_price: '', amount: '', notes: '' }];
   renderPoItems();
   new bootstrap.Modal(document.getElementById('poModal')).show();
 }
@@ -759,22 +896,197 @@ function savePO() {
   }
   var url = id ? '/api/purchase-orders/' + id : '/api/purchase-orders';
   var method = id ? 'PUT' : 'POST';
-  fetch(url, { method: method, headers: headers(), body: JSON.stringify(body) })
+  fetch(url, { method: method, headers: authHeaders(), body: JSON.stringify(body) })
     .then(function(r) { if (!r.ok) throw new Error('保存失败'); return r.json(); })
+    .then(function(savedPO) {
+      return authFetch('/api/purchase-orders/' + savedPO.id + '/status', {
+        method: 'PUT', headers: authHeaders(), body: JSON.stringify({ status: '已确认' })
+      });
+    })
+    .then(function(r) { if (!r.ok) throw new Error('确认失败'); return r.json(); })
     .then(function() {
       bootstrap.Modal.getInstance(document.getElementById('poModal')).hide();
-      showToast('采购单已保存');
-      loadPOs();
+      showToast('采购单已保存并添加到订单列表');
+      loadOrders();
     })
     .catch(function(e) { showToast(e.message, 'danger'); });
 }
 
-function deletePO(id) {
-  if (!confirm('确定删除此采购单？')) return;
-  fetch('/api/purchase-orders/' + id, { method: 'DELETE', headers: headers() })
-    .then(function(r) { if (!r.ok) throw new Error('删除失败'); return r.json(); })
-    .then(function() { showToast('已删除'); loadPOs(); })
-    .catch(function(e) { showToast(e.message, 'danger'); });
+// ─── Excel Import ────────────────────────────────────────────────────
+var pendingImportFile = null;
+
+function triggerImport() {
+  document.getElementById('importFile').value = '';
+  document.getElementById('importFile').click();
+}
+
+// ─── Batch Import ────────────────────────────────────────────────────
+var batchFiles = [];   // [{file, parsed, status}]
+var customerListCache = [];
+
+function importExcel(input) {
+  if (!input.files || !input.files.length) return;
+  batchFiles = [];
+  for (var i = 0; i < input.files.length; i++) {
+    batchFiles.push({ file: input.files[i], parsed: null, status: 'pending' });
+  }
+
+  document.getElementById('importLoading').style.display = '';
+  document.getElementById('importPreview').style.display = 'none';
+  document.getElementById('importError').style.display = 'none';
+  document.getElementById('importFooter').style.display = 'none';
+  new bootstrap.Modal(document.getElementById('importModal')).show();
+
+  // Load customer list first, then parse all files
+  authFetch('/api/customers').then(function(r) { return r.json(); }).then(function(custs) {
+    customerListCache = custs;
+    // Fill batch customer dropdown
+    var bSel = document.getElementById('imp-batch-customer');
+    bSel.innerHTML = '<option value="">--</option>';
+    custs.forEach(function(c) { bSel.innerHTML += '<option>' + esc(c) + '</option>'; });
+    return parseAllFiles();
+  }).then(function() {
+    document.getElementById('importLoading').style.display = 'none';
+    renderBatchTable();
+    document.getElementById('importPreview').style.display = '';
+    document.getElementById('importFooter').style.display = '';
+  }).catch(function(e) {
+    document.getElementById('importLoading').style.display = 'none';
+    document.getElementById('importError').style.display = '';
+    document.getElementById('importError').textContent = '解析出错: ' + e.message;
+  });
+}
+
+function parseAllFiles() {
+  var chain = Promise.resolve();
+  batchFiles.forEach(function(item, idx) {
+    chain = chain.then(function() {
+      document.getElementById('importProgress').textContent = (idx + 1) + '/' + batchFiles.length;
+      var formData = new FormData();
+      formData.append('file', item.file);
+      return authFetch('/api/import-po/preview', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + getToken() },
+        body: formData
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(result) {
+          if (result.ok) { item.parsed = result.data; item.status = 'ready'; }
+          else { item.status = 'error'; item.error = result.data.error; }
+        }).catch(function(e) { item.status = 'error'; item.error = e.message; });
+    });
+  });
+  return chain;
+}
+
+function renderBatchTable() {
+  var html = '';
+  var custOpts = '<option value="">请选择</option>';
+  customerListCache.forEach(function(c) { custOpts += '<option value="' + esc(c) + '">' + esc(c) + '</option>'; });
+
+  batchFiles.forEach(function(item, i) {
+    if (item.status === 'error') {
+      html += '<tr class="table-danger"><td><input type="checkbox" disabled></td><td colspan="9">' + esc(item.file.name) + '</td><td><span class="text-danger">' + esc(item.error) + '</span></td></tr>';
+      return;
+    }
+    var p = item.parsed;
+    var total = p.items.reduce(function(s, it) { return s + (Number(it.amount) || 0); }, 0);
+    // Auto-select customer if parsed
+    var custSelected = p.customer || '';
+    var custHtml = '<select class="form-select form-select-sm imp-row-customer" data-idx="' + i + '">' + custOpts;
+    if (custSelected && customerListCache.indexOf(custSelected) === -1) {
+      custHtml += '<option value="' + esc(custSelected) + '">' + esc(custSelected) + ' (新)</option>';
+    }
+    custHtml += '</select>';
+
+    html += '<tr data-idx="' + i + '">' +
+      '<td><input type="checkbox" class="imp-row-check" checked></td>' +
+      '<td><small>' + esc(item.file.name) + '</small></td>' +
+      '<td>' + esc(p.po_number) + '</td>' +
+      '<td>' + esc(p.supplier_name) + '</td>' +
+      '<td>' + esc(p.product_name) + '</td>' +
+      '<td>' + p.items.length + '项</td>' +
+      '<td>¥' + total.toLocaleString() + '</td>' +
+      '<td>' + custHtml + '</td>' +
+      '<td><select class="form-select form-select-sm imp-row-group" data-idx="' + i + '"><option value="">请选择</option><option>A车间</option><option>B车间</option><option>华登车间</option></select></td>' +
+      '<td><select class="form-select form-select-sm imp-row-payment" data-idx="' + i + '"><option value="">--</option><option>客付</option><option>自付</option></select></td>' +
+      '<td class="imp-row-status" id="imp-status-' + i + '"><span class="badge bg-secondary">待导入</span></td>' +
+      '</tr>';
+  });
+  document.getElementById('impBatchBody').innerHTML = html;
+  document.getElementById('imp-file-count').textContent = batchFiles.filter(function(f) { return f.status === 'ready'; }).length + ' 个文件已识别';
+
+  // Auto-select parsed customer values
+  batchFiles.forEach(function(item, i) {
+    if (item.parsed && item.parsed.customer) {
+      var sel = document.querySelector('.imp-row-customer[data-idx="' + i + '"]');
+      if (sel) sel.value = item.parsed.customer;
+    }
+  });
+}
+
+function batchSetField(field, value) {
+  if (!value) return;
+  var cls = field === 'customer' ? '.imp-row-customer' : field === 'group' ? '.imp-row-group' : '.imp-row-payment';
+  document.querySelectorAll(cls).forEach(function(sel) { sel.value = value; });
+}
+
+function toggleAllImport(checkbox) {
+  document.querySelectorAll('.imp-row-check').forEach(function(cb) { cb.checked = checkbox.checked; });
+}
+
+function confirmBatchImport() {
+  var rows = document.querySelectorAll('#impBatchBody tr[data-idx]');
+  var toImport = [];
+  var errors = [];
+  rows.forEach(function(row) {
+    var idx = Number(row.getAttribute('data-idx'));
+    var cb = row.querySelector('.imp-row-check');
+    if (!cb || !cb.checked) return;
+    var item = batchFiles[idx];
+    if (item.status !== 'ready') return;
+    var customer = row.querySelector('.imp-row-customer').value;
+    var group = row.querySelector('.imp-row-group').value;
+    var payment = row.querySelector('.imp-row-payment').value;
+    if (!customer) { errors.push(item.file.name + ': 请选择客户'); return; }
+    if (!group) { errors.push(item.file.name + ': 请选择车间'); return; }
+    toImport.push({ idx: idx, file: item.file, customer: customer, group: group, payment: payment });
+  });
+
+  if (errors.length) { showToast(errors[0], 'danger'); return; }
+  if (!toImport.length) { showToast('没有可导入的文件', 'danger'); return; }
+
+  // Import one by one sequentially
+  var chain = Promise.resolve();
+  var successCount = 0;
+  toImport.forEach(function(task) {
+    chain = chain.then(function() {
+      document.getElementById('imp-status-' + task.idx).innerHTML = '<span class="badge bg-info">导入中...</span>';
+      var formData = new FormData();
+      formData.append('file', task.file);
+      formData.append('group', task.group);
+      formData.append('customer', task.customer);
+      formData.append('payment_type', task.payment);
+      return authFetch('/api/import-po/confirm', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + getToken() },
+        body: formData
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(result) {
+          if (result.ok) {
+            document.getElementById('imp-status-' + task.idx).innerHTML = '<span class="badge bg-success">已导入</span>';
+            successCount++;
+          } else {
+            document.getElementById('imp-status-' + task.idx).innerHTML = '<span class="badge bg-danger">失败</span>';
+          }
+        }).catch(function() {
+          document.getElementById('imp-status-' + task.idx).innerHTML = '<span class="badge bg-danger">失败</span>';
+        });
+    });
+  });
+  chain.then(function() {
+    showToast('成功导入 ' + successCount + '/' + toImport.length + ' 个采购单');
+    if (successCount > 0) { loadOrders(); loadCustomers(); }
+  });
 }
 
 setInterval(loadOrders, 30000);

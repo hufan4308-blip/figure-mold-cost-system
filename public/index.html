@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>模具 手办采购订单系统 - 登录</title>
+  <link href="vendor/bootstrap.min.css" rel="stylesheet">
+  <link href="vendor/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<div class="login-card">
+  <div class="login-header">
+    <h4 class="mb-1"><i class="bi bi-gear-wide-connected"></i> 采购订单系统</h4>
+    <small>模具 &amp; 手办 订单管理</small>
+  </div>
+  <div class="card-body p-4">
+    <div id="errMsg" class="alert alert-danger d-none"></div>
+    <div class="mb-3">
+      <label class="form-label">姓名</label>
+      <input type="text" class="form-control" id="loginName" placeholder="请输入姓名" autofocus>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">PIN码</label>
+      <input type="password" class="form-control" id="loginPin" placeholder="请输入PIN码" maxlength="6">
+    </div>
+    <button class="btn btn-primary w-100" onclick="doLogin()">登 录</button>
+  </div>
+</div>
+
+<script src="vendor/bootstrap.bundle.min.js"></script>
+<script>
+// If already logged in, redirect
+if (sessionStorage.getItem('token')) {
+  window.location.href = 'mold.html';
+}
+
+document.getElementById('loginPin').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doLogin();
+});
+document.getElementById('loginName').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') document.getElementById('loginPin').focus();
+});
+
+function doLogin() {
+  var name = document.getElementById('loginName').value.trim();
+  var pin = document.getElementById('loginPin').value.trim();
+  if (!name || !pin) {
+    showErr('请输入姓名和PIN码');
+    return;
+  }
+  fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name, pin: pin })
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.success) {
+      sessionStorage.setItem('user', data.name);
+      sessionStorage.setItem('token', data.token);
+      window.location.href = 'mold.html';
+    } else {
+      showErr(data.error || '登录失败');
+    }
+  }).catch(function() {
+    showErr('网络错误，请重试');
+  });
+}
+
+function showErr(msg) {
+  var el = document.getElementById('errMsg');
+  el.textContent = msg;
+  el.classList.remove('d-none');
+  setTimeout(function() { el.classList.add('d-none'); }, 3000);
+}
+</script>
+</body>
+</html>

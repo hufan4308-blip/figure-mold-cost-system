@@ -2,12 +2,32 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const multer = require('multer');
+const XLSX = require('xlsx');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
-const DATA_DIR = path.join(__dirname, 'data');
+const JWT_SECRET = process.env.JWT_SECRET || 'rr-procurement-secret-change-in-production';
+const DATA_DIR = process.env.DATA_PATH || path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'data.json');
-const UPLOADS_DIR = path.join(__dirname, 'public', 'uploads');
+const UPLOADS_DIR = process.env.UPLOADS_PATH || path.join(__dirname, 'public', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+// File upload: only xlsx/xls, max 10MB
+const upload = multer({
+  dest: path.join(os.tmpdir(), 'po-uploads'),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.xlsx', '.xls'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) cb(null, true);
+    else cb(new Error('只允许上传 Excel 文件 (.xlsx, .xls)'));
+  }
+});
 
 // ─── JSON Storage (cache + atomic write) ────────────────────────────────
 let _cache = null;
@@ -22,7 +42,12 @@ function loadData() {
         customers: [], eng_users: [], nextId: 1
       }, null, 2));
     }
-    _cache = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    try {
+      _cache = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    } catch (e) {
+      console.error('[FATAL] data.json parse error:', e.message);
+      throw new Error('数据文件损坏，请联系管理员');
+    }
   }
   return JSON.parse(JSON.stringify(_cache));
 }
@@ -30,8 +55,13 @@ function loadData() {
 function saveData(data) {
   _cache = data;
   const tmp = DATA_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, DATA_FILE);
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, DATA_FILE);
+  } catch (e) {
+    console.error('[FATAL] data.json write error:', e.message);
+    throw new Error('数据保存失败');
+  }
 }
 
 // ─── Image Helper ───────────────────────────────────────────────────────
@@ -47,6 +77,7 @@ function saveImage(imageData) {
 }
 
 // ─── Middleware ──────────────────────────────────────────────────────────
+app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use((req, res, next) => {
   if (req.path.endsWith('.html') || req.path === '/') {
@@ -58,21 +89,62 @@ app.use((req, res, next) => {
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Auth middleware: write operations need X-User header (except /api/login)
+// Health check (no auth needed)
+app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+
+// Login rate limiting: max 10 attempts per 15 minutes per IP
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: '登录尝试过多，请15分钟后再试' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// JWT helper
+function verifyToken(req) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) return null;
+  try {
+    return jwt.verify(auth.substring(7), JWT_SECRET);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Auth middleware: all /api routes require JWT (except /api/login)
 app.use('/api', (req, res, next) => {
-  if (req.method === 'GET' || req.path === '/login') return next();
-  const user = decodeURIComponent(req.headers['x-user'] || '');
-  if (!user) return res.status(401).json({ error: '未登录' });
+  if (req.path === '/login') return next();
+  const payload = verifyToken(req);
+  if (!payload) return res.status(401).json({ error: '未登录或登录已过期' });
+  req.user = payload.name;
   next();
 });
 
 // ─── Login ──────────────────────────────────────────────────────────────
-app.post('/api/login', (req, res) => {
+app.post('/api/login', loginLimiter, (req, res) => {
   const { name, pin } = req.body;
+  if (!name || !pin) return res.status(400).json({ error: '请输入用户名和密码' });
   const data = loadData();
-  const user = data.eng_users.find(u => u.name === name && u.pin === String(pin));
+  const user = data.eng_users.find(u => u.name === name);
   if (!user) return res.status(401).json({ error: '用户名或密码错误' });
-  res.json({ success: true, name: user.name });
+
+  // Support both bcrypt hash and legacy plain PIN (auto-upgrade on match)
+  let pinMatch = false;
+  if (user.pin && user.pin.startsWith('$2')) {
+    pinMatch = bcrypt.compareSync(String(pin), user.pin);
+  } else {
+    pinMatch = user.pin === String(pin);
+    // Auto-upgrade plain PIN to bcrypt hash
+    if (pinMatch) {
+      user.pin = bcrypt.hashSync(String(pin), 10);
+      saveData(data);
+    }
+  }
+  if (!pinMatch) return res.status(401).json({ error: '用户名或密码错误' });
+
+  const token = jwt.sign({ name: user.name }, JWT_SECRET, { expiresIn: '24h' });
+  res.json({ success: true, name: user.name, token: token });
 });
 
 // ─── Base Data ──────────────────────────────────────────────────────────
@@ -99,7 +171,7 @@ app.get('/api/mold-orders/stats', (req, res) => {
   if (year) orders = orders.filter(o => o.order_date && o.order_date.startsWith(year));
   if (year && month) orders = orders.filter(o => o.order_date && o.order_date.startsWith(year + '-' + month.padStart(2, '0')));
 
-  const key = group_by === 'customer' ? 'customer' : 'mold_factory';
+  const key = group_by === 'customer' ? 'customer' : group_by === 'workshop' ? 'group' : 'mold_factory';
   const grouped = {};
   orders.forEach(o => {
     const k = o[key] || '未知';
@@ -151,7 +223,7 @@ app.get('/api/mold-orders/:id', (req, res) => {
 // Create
 app.post('/api/mold-orders', (req, res) => {
   const data = loadData();
-  const user = decodeURIComponent(req.headers['x-user'] || '');
+  const user = req.user || '';
   const image = req.body.image_data ? saveImage(req.body.image_data) : '';
   const order = {
     id: data.nextId++,
@@ -249,7 +321,7 @@ app.get('/api/figure-orders/stats', (req, res) => {
   if (year) orders = orders.filter(o => o.order_date && o.order_date.startsWith(year));
   if (year && month) orders = orders.filter(o => o.order_date && o.order_date.startsWith(year + '-' + month.padStart(2, '0')));
 
-  const key = group_by === 'customer' ? 'customer' : 'figure_factory';
+  const key = group_by === 'customer' ? 'customer' : group_by === 'workshop' ? 'group' : 'figure_factory';
   const grouped = {};
   orders.forEach(o => {
     const k = o[key] || '未知';
@@ -304,7 +376,7 @@ app.get('/api/figure-orders/:id', (req, res) => {
 // Create
 app.post('/api/figure-orders', (req, res) => {
   const data = loadData();
-  const user = decodeURIComponent(req.headers['x-user'] || '');
+  const user = req.user || '';
   const order = {
     id: data.nextId++,
     group: req.body.group || '',
@@ -426,7 +498,7 @@ app.post('/api/purchase-orders', (req, res) => {
   const data = loadData();
   if (!data.purchase_orders) data.purchase_orders = [];
   if (!data.po_next_id) data.po_next_id = 1;
-  const user = decodeURIComponent(req.headers['x-user'] || '');
+  const user = req.user || '';
   const b = req.body;
 
   // Save images in items
@@ -512,7 +584,7 @@ app.delete('/api/purchase-orders/:id', (req, res) => {
   res.json({ success: true });
 });
 
-// Status transition
+// Status transition — on confirm, auto-create summary order in main list
 app.put('/api/purchase-orders/:id/status', (req, res) => {
   const data = loadData();
   const id = Number(req.params.id);
@@ -525,8 +597,415 @@ app.put('/api/purchase-orders/:id/status', (req, res) => {
   }
   po.status = newStatus;
   po.updated_at = new Date().toISOString();
+
+  // When confirming a PO, auto-add a summary record to the main order list
+  if (newStatus === '已确认') {
+    const user = req.user || '';
+    const items = po.items || [];
+    const totalAmount = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+    const totalQty = items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+    const today = new Date().toISOString().substring(0, 10);
+
+    if (po.type === 'mold') {
+      // Mold PO → mold_orders (summary: product_name as mold_name, total amount)
+      const order = {
+        id: data.nextId++,
+        group: po.group || '',
+        customer: po.product_name || '',
+        mold_name: items.map(it => it.part_name).filter(Boolean).join(', ') || po.product_name || '',
+        material: '',
+        gate: '',
+        cav_up: '',
+        unit_price: 0,
+        amount: totalAmount,
+        image: '',
+        mold_factory: po.supplier_name || '',
+        order_date: today,
+        mold_start_date: '',
+        delivery_date: '',
+        status: '已下单',
+        payment_type: po.payment_type || '',
+        notes: '来自采购单 ' + po.po_number,
+        created_by: user,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        from_po_id: po.id
+      };
+      data.mold_orders.push(order);
+    } else {
+      // Figure PO → figure_orders (summary: total qty, total fee)
+      const order = {
+        id: data.nextId++,
+        group: po.group || '',
+        customer: po.product_name || '',
+        product_name: items.map(it => it.product_name).filter(Boolean).join(', ') || po.product_name || '',
+        quantity: totalQty,
+        figure_fee: totalAmount,
+        figure_factory: po.supplier_name || '',
+        order_date: today,
+        status: '已下单',
+        payment_type: po.payment_type || '',
+        notes: '来自采购单 ' + po.po_number,
+        created_by: user,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        from_po_id: po.id
+      };
+      data.figure_orders.push(order);
+    }
+  }
+
   saveData(data);
   res.json(po);
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// IMPORT EXCEL PO
+// ═══════════════════════════════════════════════════════════════════════
+
+function getCellValue(ws, r, c) {
+  const addr = XLSX.utils.encode_cell({ r, c });
+  const cell = ws[addr];
+  return cell ? String(cell.v).trim() : '';
+}
+
+function parseExcelPO(filePath) {
+  const wb = XLSX.readFile(filePath);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+
+  // Detect type by header row — look for "模具名称" (mold) or "手办名称" (figure)
+  let headerRow = -1;
+  let poType = '';
+  for (let r = 10; r <= Math.min(range.e.r, 20); r++) {
+    for (let c = range.s.c; c <= Math.min(range.e.c, 14); c++) {
+      const v = getCellValue(ws, r, c);
+      if (v.includes('模具名称')) { headerRow = r; poType = 'mold'; break; }
+      if (v.includes('手办名称')) { headerRow = r; poType = 'figure'; break; }
+    }
+    if (headerRow >= 0) break;
+  }
+  if (headerRow < 0) throw new Error('无法识别采购单类型，未找到"模具名称"或"手办名称"表头');
+
+  // Parse header info (rows 8-12 area)
+  // R8: 供应商 + 订单编号
+  let supplier = '', poNumber = '', customer = '', productName = '';
+  for (let r = 6; r <= 12; r++) {
+    for (let c = range.s.c; c <= Math.min(range.e.c, 14); c++) {
+      const v = getCellValue(ws, r, c);
+      if (v.startsWith('供应商') && (v.includes('：') || v.includes(':'))) {
+        let sVal = v.replace(/^供应商[：:]/, '').trim();
+        if (!sVal) {
+          for (let cc = c + 1; cc <= Math.min(c + 3, range.e.c); cc++) {
+            sVal = getCellValue(ws, r, cc);
+            if (sVal) break;
+          }
+        }
+        if (!supplier) supplier = sVal;
+      }
+      if (v.includes('订单编号：') || v.includes('订单编号:')) {
+        // PO number could be in same cell, next cell, or a few cells over (merged cells)
+        let numVal = v.replace(/.*订单编号[：:]/, '').trim();
+        if (!numVal) {
+          for (let cc = c + 1; cc <= Math.min(c + 3, range.e.c); cc++) {
+            numVal = getCellValue(ws, r, cc);
+            if (numVal) break;
+          }
+        }
+        poNumber = numVal;
+      }
+      if (v.includes('联络人：') && !supplier) {
+        // skip
+      }
+      // Product/customer line: "产品货号：PF001  客户：PROJECTNAME" or "货名：SP003" + next cell "客户： TIG"
+      if (v.includes('产品货号') || v.includes('货名')) {
+        const pMatch = v.match(/(?:产品货号|货名)[：:]\s*(\S+)/);
+        if (pMatch) productName = pMatch[1];
+        const cMatch = v.match(/客户[：:]\s*(\S+)/);
+        if (cMatch) customer = cMatch[1];
+        // Customer might be in another cell on same row
+        if (!customer) {
+          for (let cc = c + 1; cc <= Math.min(range.e.c, 14); cc++) {
+            const cv = getCellValue(ws, r, cc);
+            if (cv.includes('客户')) {
+              const cm = cv.match(/客户[：:]\s*(\S+)/);
+              if (cm) customer = cm[1];
+              break;
+            }
+          }
+        }
+      }
+      // Also check cells that start with "客户" directly
+      if (v.match(/^客户[：:]/)) {
+        const cm = v.match(/客户[：:]\s*(\S+)/);
+        if (cm && !customer) customer = cm[1];
+      }
+    }
+  }
+
+  // Parse supplier contact (row after supplier)
+  let supplierContact = '', supplierPhone = '';
+  for (let r = 6; r <= 12; r++) {
+    for (let c = range.s.c; c <= Math.min(range.e.c, 14); c++) {
+      const v = getCellValue(ws, r, c);
+      if (v.startsWith('联络人') && (v.includes('：') || v.includes(':'))) {
+        let cVal = v.replace(/^联络人[：:]/, '').trim();
+        if (!cVal) {
+          for (let cc = c + 1; cc <= Math.min(c + 3, range.e.c); cc++) {
+            cVal = getCellValue(ws, r, cc);
+            if (cVal) break;
+          }
+        }
+        // Only take the first one (supplier side, left part of sheet)
+        if (cVal && !supplierContact) supplierContact = cVal;
+      }
+      if (v.startsWith('联系电话') && (v.includes('：') || v.includes(':')) && !supplierPhone) {
+        let pVal = v.replace(/^联系电话[：:]/, '').trim();
+        if (!pVal) {
+          for (let cc = c + 1; cc <= Math.min(c + 3, range.e.c); cc++) {
+            pVal = getCellValue(ws, r, cc);
+            if (pVal) break;
+          }
+        }
+        supplierPhone = pVal;
+      }
+    }
+  }
+
+  // Parse delivery terms (rows after data)
+  let deliveryText = '';
+  for (let r = headerRow + 1; r <= range.e.r; r++) {
+    const v = getCellValue(ws, r, range.s.c) || getCellValue(ws, r, range.s.c + 1);
+    if (v.match(/^\d+[\.\s].*年.*月.*日.*交货/)) {
+      deliveryText = v;
+      break;
+    }
+  }
+
+  // Parse items
+  const items = [];
+  // Find column mapping from header row
+  const colMap = {};
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    const h = getCellValue(ws, headerRow, c);
+    if (h.includes('序号')) colMap.seq = c;
+    if (h.includes('模具名称') || h.includes('手办名称')) colMap.name = c;
+    if (h.includes('入水方式') || h.includes('性质')) colMap.gate = c;
+    if (h.includes('产品材料')) colMap.material = c;
+    if (h.includes('模具材料')) colMap.mold_material = c;
+    if (h.includes('穴数') || h.includes('套数')) colMap.cav_up = c;
+    if (h === '数量') colMap.quantity = c;
+    if (h === '单位') colMap.unit = c;
+    if (h.includes('单价')) colMap.unit_price = c;
+    if (h.includes('金额') || h.includes('金 额')) colMap.amount = c;
+    if (h.includes('备') && h.includes('注')) colMap.notes = c;
+    if (h.includes('图片')) colMap.image = c;
+  }
+
+  for (let r = headerRow + 1; r <= range.e.r; r++) {
+    const seqVal = getCellValue(ws, r, colMap.seq || range.s.c);
+    const nameVal = getCellValue(ws, r, colMap.name);
+    const amountVal = getCellValue(ws, r, colMap.amount);
+
+    // Stop at total row
+    if (amountVal && getCellValue(ws, r, (colMap.amount || 7) - 1).includes('合计')) break;
+    if (seqVal.includes('合计') || nameVal.includes('合计')) break;
+
+    // Check if row has any meaningful data (amount, gate/nature, quantity)
+    const gateVal = getCellValue(ws, r, colMap.gate);
+    const qtyVal = getCellValue(ws, r, colMap.quantity);
+    const hasData = seqVal || nameVal || (amountVal && Number(amountVal)) || gateVal || (qtyVal && Number(qtyVal));
+
+    // Skip truly empty rows
+    if (!hasData) continue;
+
+    if (poType === 'mold') {
+      items.push({
+        part_name: nameVal,
+        material: getCellValue(ws, r, colMap.material),
+        gate: getCellValue(ws, r, colMap.gate),
+        cav_up: getCellValue(ws, r, colMap.cav_up),
+        unit_price: Number(getCellValue(ws, r, colMap.unit_price)) || 0,
+        amount: Number(getCellValue(ws, r, colMap.amount)) || 0,
+        notes: getCellValue(ws, r, colMap.notes)
+      });
+    } else {
+      items.push({
+        product_name: nameVal,
+        nature: getCellValue(ws, r, colMap.gate),
+        quantity: Number(getCellValue(ws, r, colMap.quantity)) || 0,
+        unit: getCellValue(ws, r, colMap.unit),
+        unit_price: Number(getCellValue(ws, r, colMap.unit_price)) || 0,
+        amount: Number(getCellValue(ws, r, colMap.amount)) || 0,
+        notes: getCellValue(ws, r, colMap.notes)
+      });
+    }
+  }
+
+  return {
+    type: poType,
+    po_number: poNumber,
+    supplier_name: supplier,
+    supplier_contact: supplierContact,
+    supplier_phone: supplierPhone,
+    product_name: productName,
+    customer: customer,
+    delivery_text: deliveryText,
+    items: items
+  };
+}
+
+// Import Excel → preview parsed data
+app.post('/api/import-po/preview', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '未上传文件' });
+    const result = parseExcelPO(req.file.path);
+    // Clean up temp file
+    try { fs.unlinkSync(req.file.path); } catch(e) {}
+    res.json(result);
+  } catch (e) {
+    try { if (req.file) fs.unlinkSync(req.file.path); } catch(ex) {}
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Helper: match full supplier name (e.g. "东莞市力众模具有限公司") to existing short factory name (e.g. "力众")
+function matchFactory(fullName, factoryList) {
+  if (!fullName) return '';
+  if (factoryList.includes(fullName)) return fullName;
+  for (const short of factoryList) {
+    if (fullName.includes(short)) return short;
+  }
+  return fullName;
+}
+
+// Import Excel → create PO + auto-confirm → create order
+app.post('/api/import-po/confirm', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '未上传文件' });
+    const parsed = parseExcelPO(req.file.path);
+    try { fs.unlinkSync(req.file.path); } catch(e) {}
+
+    const data = loadData();
+    // Auto-match: "东莞市力众模具有限公司" → "力众"
+    const factoryList = parsed.type === 'mold' ? (data.mold_factories || []) : (data.figure_factories || []);
+    const matchedFactory = matchFactory(parsed.supplier_name, factoryList);
+    if (!data.purchase_orders) data.purchase_orders = [];
+    if (!data.po_next_id) data.po_next_id = 1;
+    const user = req.user || '';
+    const group = req.body.group || '';
+    const paymentType = req.body.payment_type || '';
+    const customerOverride = req.body.customer || '';  // user-selected customer from frontend
+    const today = new Date().toISOString().substring(0, 10);
+
+    // Create PO
+    const po = {
+      id: data.po_next_id++,
+      po_number: parsed.po_number || generatePoNumber(parsed.type),
+      type: parsed.type,
+      group: group,
+      supplier_name: parsed.supplier_name,
+      supplier_contact: parsed.supplier_contact,
+      supplier_phone: parsed.supplier_phone,
+      supplier_fax: '',
+      our_contact: user,
+      our_phone: '0769-87362376',
+      product_name: parsed.product_name,
+      customer: customerOverride || parsed.customer,
+      items: parsed.items,
+      delivery_date_text: parsed.delivery_text,
+      delivery_address: '东莞清溪上元管理区银坑路兴信厂',
+      payment_terms: '',
+      payment_type: paymentType,
+      tax_rate: 13,
+      settlement_days: 30,
+      notes: '',
+      status: '已确认',
+      created_by: user,
+      created_at: new Date().toISOString()
+    };
+    data.purchase_orders.push(po);
+
+    // Auto-create order in main list
+    const totalAmount = parsed.items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+
+    if (parsed.type === 'mold') {
+      const order = {
+        id: data.nextId++,
+        group: group,
+        customer: customerOverride || parsed.customer || '',
+        mold_name: parsed.product_name || '',
+        material: '',
+        gate: '',
+        cav_up: '',
+        unit_price: parsed.items.length,
+        amount: totalAmount,
+        image: '',
+        mold_factory: matchedFactory || '',
+        order_date: today,
+        mold_start_date: '',
+        delivery_date: '',
+        status: '已下单',
+        payment_type: paymentType,
+        notes: '导入自采购单 ' + po.po_number,
+        created_by: user,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        from_po_id: po.id
+      };
+      data.mold_orders.push(order);
+    } else {
+      const totalQty = parsed.items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+      const order = {
+        id: data.nextId++,
+        group: group,
+        customer: customerOverride || parsed.customer || '',
+        product_name: parsed.product_name || '',
+        quantity: totalQty,
+        figure_fee: totalAmount,
+        figure_factory: matchedFactory || '',
+        order_date: today,
+        status: '已下单',
+        payment_type: paymentType,
+        notes: '导入自采购单 ' + po.po_number,
+        created_by: user,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        from_po_id: po.id
+      };
+      data.figure_orders.push(order);
+    }
+
+    // Add customer if new
+    const finalCustomer = customerOverride || parsed.customer;
+    if (finalCustomer && !data.customers.includes(finalCustomer)) {
+      data.customers.push(finalCustomer);
+    }
+
+    saveData(data);
+    res.json({ success: true, po: po, parsed: parsed });
+  } catch (e) {
+    try { if (req.file) fs.unlinkSync(req.file.path); } catch(ex) {}
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ─── Global Error Handler ────────────────────────────────────────────────
+app.use((err, req, res, next) => {
+  console.error('[ERROR]', new Date().toISOString(), err.stack || err.message);
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: '文件大小不能超过10MB' });
+    return res.status(400).json({ error: '文件上传错误: ' + err.message });
+  }
+  res.status(500).json({ error: '服务器内部错误' });
+});
+
+// Uncaught error handlers
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled Rejection:', reason);
 });
 
 // ─── Start Server ───────────────────────────────────────────────────────
