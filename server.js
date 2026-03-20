@@ -672,58 +672,110 @@ function getCellValue(ws, r, c) {
 function parseExcelPO(filePath) {
   const wb = XLSX.readFile(filePath);
   const ws = wb.Sheets[wb.SheetNames[0]];
+  const sheetName = wb.SheetNames[0];
   const range = XLSX.utils.decode_range(ws['!ref']);
 
-  // Detect type by header row — look for "模具名称" (mold) or "手办名称" (figure)
+  // ── Step 1: Find header row (flexible detection) ──────────────────
+  // Mold keywords: 模具名称, 零件名称, 模具材料, 入水方式, GATE, CAV, 穴数
+  // Figure keywords: 手办名称, 产品名称, 加工工艺, 性质
+  // Common keywords: 序号, 名称, 货名, 项目内容, 单价, 金额
+  const moldHeaders = ['模具名称', '零件名称', '入水方式', 'GATE', '穴数', '套数', '模具材料', '工模尺寸', '工模材质'];
+  const figureHeaders = ['手办名称', '产品名称', '加工工艺', '性质', '规格材质', '规格'];
+  const genericHeaders = ['序号', '名称', '货名', '项目内容', '单价', '金额'];
+
   let headerRow = -1;
   let poType = '';
-  for (let r = 10; r <= Math.min(range.e.r, 20); r++) {
-    for (let c = range.s.c; c <= Math.min(range.e.c, 14); c++) {
-      const v = getCellValue(ws, r, c);
-      if (v.includes('模具名称')) { headerRow = r; poType = 'mold'; break; }
-      if (v.includes('手办名称')) { headerRow = r; poType = 'figure'; break; }
-    }
-    if (headerRow >= 0) break;
-  }
-  if (headerRow < 0) throw new Error('无法识别采购单类型，未找到"模具名称"或"手办名称"表头');
+  let moldScore = 0, figureScore = 0;
 
-  // Parse header info (rows 8-12 area)
-  // R8: 供应商 + 订单编号
+  for (let r = 0; r <= Math.min(range.e.r, 25); r++) {
+    let rowMold = 0, rowFigure = 0, rowGeneric = 0;
+    for (let c = range.s.c; c <= Math.min(range.e.c, 20); c++) {
+      const v = getCellValue(ws, r, c);
+      if (!v) continue;
+      for (const kw of moldHeaders) { if (v.includes(kw)) rowMold++; }
+      for (const kw of figureHeaders) { if (v.includes(kw)) rowFigure++; }
+      for (const kw of genericHeaders) { if (v.includes(kw)) rowGeneric++; }
+    }
+    // Need at least one type-specific match, or 2+ generic matches with sheet name hint
+    if (rowMold > 0 && rowGeneric >= 1) {
+      headerRow = r; moldScore = rowMold + rowGeneric; break;
+    }
+    if (rowFigure > 0 && rowGeneric >= 1) {
+      headerRow = r; figureScore = rowFigure + rowGeneric; break;
+    }
+    if (rowGeneric >= 2 && headerRow < 0) {
+      // Possible header with generic columns only — keep searching for a better match
+      headerRow = r;
+    }
+  }
+
+  // If only generic headers found, use sheet name and content to decide type
+  if (moldScore === 0 && figureScore === 0 && headerRow >= 0) {
+    // Check sheet name: "B" → mold, "兴信A" → figure
+    if (sheetName === 'B' || sheetName.includes('B')) moldScore = 1;
+    else if (sheetName.includes('A') || sheetName.includes('兴信')) figureScore = 1;
+    // Scan all text for type hints
+    let allText = '';
+    for (let r = 0; r <= Math.min(range.e.r, 30); r++) {
+      for (let c = range.s.c; c <= Math.min(range.e.c, 14); c++) {
+        allText += getCellValue(ws, r, c) + ' ';
+      }
+    }
+    if (allText.match(/工模|模具|开模|模价/)) moldScore += 2;
+    if (allText.match(/手办|样板|样办|上色|打板|打样|手板|3D/)) figureScore += 2;
+  }
+
+  if (headerRow < 0) {
+    throw new Error('无法识别采购单格式，未找到表头行（需包含序号/名称/单价/金额等列）');
+  }
+
+  poType = moldScore > figureScore ? 'mold' : (figureScore > moldScore ? 'figure' : '');
+  // Final fallback: sheet name
+  if (!poType) {
+    poType = (sheetName === 'B' || sheetName.includes('工模')) ? 'mold' : 'figure';
+  }
+
+  // ── Step 2: Parse header info (rows 0 to headerRow) ───────────────
   let supplier = '', poNumber = '', customer = '', productName = '';
-  for (let r = 6; r <= 12; r++) {
+  const infoEnd = Math.min(headerRow, 20);
+  for (let r = 0; r <= infoEnd; r++) {
     for (let c = range.s.c; c <= Math.min(range.e.c, 14); c++) {
       const v = getCellValue(ws, r, c);
-      if (v.startsWith('供应商') && (v.includes('：') || v.includes(':'))) {
-        let sVal = v.replace(/^供应商[：:]/, '').trim();
-        if (!sVal) {
-          for (let cc = c + 1; cc <= Math.min(c + 3, range.e.c); cc++) {
-            sVal = getCellValue(ws, r, cc);
-            if (sVal) break;
-          }
-        }
+      if (!v) continue;
+
+      // Supplier
+      if (v.match(/^供应商[：:]/) || v.match(/^供方[：:]/)) {
+        let sVal = v.replace(/^(?:供应商|供方)[：:]/, '').trim();
+        if (!sVal) sVal = getNextCellValue(ws, r, c, range.e.c);
         if (!supplier) supplier = sVal;
       }
-      if (v.includes('订单编号：') || v.includes('订单编号:')) {
-        // PO number could be in same cell, next cell, or a few cells over (merged cells)
+      // Also: "TO：东莞兴信" (supplier report format, supplier is the sender)
+      if (v.match(/^(?:From|发件|公司名称)[：:]/i) && !supplier) {
+        let sVal = v.replace(/^(?:From|发件|公司名称)[：:]/i, '').trim();
+        if (!sVal) sVal = getNextCellValue(ws, r, c, range.e.c);
+        if (sVal) supplier = sVal;
+      }
+
+      // PO number
+      if (v.includes('订单编号') && (v.includes('：') || v.includes(':'))) {
         let numVal = v.replace(/.*订单编号[：:]/, '').trim();
-        if (!numVal) {
-          for (let cc = c + 1; cc <= Math.min(c + 3, range.e.c); cc++) {
-            numVal = getCellValue(ws, r, cc);
-            if (numVal) break;
+        if (!numVal) numVal = getNextCellValue(ws, r, c, range.e.c);
+        if (!poNumber) poNumber = numVal;
+      }
+
+      // Product and customer
+      if (v.match(/(?:产品货号|货名|货号)[：:]/)) {
+        const pMatch = v.match(/(?:产品货号|货名|货号)[：:]\s*(\S+)/);
+        if (pMatch && !productName) {
+          // Make sure we didn't accidentally grab "客户：xxx"
+          if (!pMatch[1].startsWith('客户')) productName = pMatch[1];
+          else { // product name is empty, check next cell
+            const nextProd = getNextCellValue(ws, r, c, range.e.c);
+            if (nextProd && !nextProd.includes('客户')) productName = nextProd;
           }
         }
-        poNumber = numVal;
-      }
-      if (v.includes('联络人：') && !supplier) {
-        // skip
-      }
-      // Product/customer line: "产品货号：PF001  客户：PROJECTNAME" or "货名：SP003" + next cell "客户： TIG"
-      if (v.includes('产品货号') || v.includes('货名')) {
-        const pMatch = v.match(/(?:产品货号|货名)[：:]\s*(\S+)/);
-        if (pMatch) productName = pMatch[1];
         const cMatch = v.match(/客户[：:]\s*(\S+)/);
-        if (cMatch) customer = cMatch[1];
-        // Customer might be in another cell on same row
+        if (cMatch && !customer) customer = cMatch[1];
         if (!customer) {
           for (let cc = c + 1; cc <= Math.min(range.e.c, 14); cc++) {
             const cv = getCellValue(ws, r, cc);
@@ -735,111 +787,184 @@ function parseExcelPO(filePath) {
           }
         }
       }
-      // Also check cells that start with "客户" directly
-      if (v.match(/^客户[：:]/)) {
+      if (v.match(/^客户[：:]/) && !customer) {
         const cm = v.match(/客户[：:]\s*(\S+)/);
-        if (cm && !customer) customer = cm[1];
+        if (cm) customer = cm[1];
       }
     }
   }
 
-  // Parse supplier contact (row after supplier)
-  let supplierContact = '', supplierPhone = '';
-  for (let r = 6; r <= 12; r++) {
+  // ── Step 3: Parse date ─────────────────────────────────────────────
+  let orderDate = '';
+  for (let r = 0; r <= infoEnd; r++) {
+    if (orderDate) break;
     for (let c = range.s.c; c <= Math.min(range.e.c, 14); c++) {
       const v = getCellValue(ws, r, c);
-      if (v.startsWith('联络人') && (v.includes('：') || v.includes(':'))) {
-        let cVal = v.replace(/^联络人[：:]/, '').trim();
-        if (!cVal) {
-          for (let cc = c + 1; cc <= Math.min(c + 3, range.e.c); cc++) {
-            cVal = getCellValue(ws, r, cc);
-            if (cVal) break;
+      // "日期：2026-03-15" or "日期：2026/03/15"
+      const dm1 = v.match(/日期[：:]\s*(\d{4}[-\/]\d{1,2}[-\/]\d{1,2})/);
+      if (dm1) { orderDate = dm1[1].replace(/\//g, '-'); break; }
+      // "日期：2026年3月15日"
+      const dm2 = v.match(/日期[：:]\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+      if (dm2) { orderDate = dm2[1] + '-' + dm2[2].padStart(2, '0') + '-' + dm2[3].padStart(2, '0'); break; }
+      // "日期" label in one cell, date value in next cell
+      if (v.match(/^日期[：:]?\s*$/)) {
+        for (let cc = c + 1; cc <= Math.min(c + 3, range.e.c); cc++) {
+          const dv = getCellValue(ws, r, cc);
+          const dm3 = dv.match(/^(\d{4}[-\/]\d{1,2}[-\/]\d{1,2})/);
+          if (dm3) { orderDate = dm3[1].replace(/\//g, '-'); break; }
+          const dm4 = dv.match(/^(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+          if (dm4) { orderDate = dm4[1] + '-' + dm4[2].padStart(2, '0') + '-' + dm4[3].padStart(2, '0'); break; }
+          const cell = ws[XLSX.utils.encode_cell({ r, c: cc })];
+          if (cell && cell.t === 'n' && cell.v > 40000 && cell.v < 55000) {
+            const dt = XLSX.SSF.parse_date_code(cell.v);
+            orderDate = dt.y + '-' + String(dt.m).padStart(2, '0') + '-' + String(dt.d).padStart(2, '0');
+            break;
           }
         }
-        // Only take the first one (supplier side, left part of sheet)
+        if (orderDate) break;
+      }
+      // Standalone date cell
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      if (cell && cell.t === 'd') {
+        const dt = new Date(cell.v);
+        orderDate = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+        break;
+      }
+    }
+  }
+  // Try to extract date from filename if not found in content: "20250102中尚.xlsx" → 2025-01-02
+  if (!orderDate) {
+    const fnMatch = path.basename(filePath).match(/^(\d{4})(\d{2})(\d{2})/);
+    if (fnMatch) {
+      const y = Number(fnMatch[1]), m = Number(fnMatch[2]), d = Number(fnMatch[3]);
+      if (y >= 2020 && y <= 2030 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        orderDate = fnMatch[1] + '-' + fnMatch[2] + '-' + fnMatch[3];
+      }
+    }
+  }
+  if (orderDate) {
+    const parts = orderDate.split('-');
+    if (parts.length === 3) orderDate = parts[0] + '-' + parts[1].padStart(2, '0') + '-' + parts[2].padStart(2, '0');
+  }
+
+  // ── Step 4: Parse supplier contact ─────────────────────────────────
+  let supplierContact = '', supplierPhone = '';
+  for (let r = 0; r <= infoEnd; r++) {
+    for (let c = range.s.c; c <= Math.min(range.e.c, 14); c++) {
+      const v = getCellValue(ws, r, c);
+      if (v.match(/^联络人[：:]/) || v.match(/^联系人[：:]/)) {
+        let cVal = v.replace(/^联[络系]人[：:]/, '').trim();
+        if (!cVal) cVal = getNextCellValue(ws, r, c, range.e.c);
         if (cVal && !supplierContact) supplierContact = cVal;
       }
-      if (v.startsWith('联系电话') && (v.includes('：') || v.includes(':')) && !supplierPhone) {
+      if (v.match(/^联系电话[：:]/) && !supplierPhone) {
         let pVal = v.replace(/^联系电话[：:]/, '').trim();
-        if (!pVal) {
-          for (let cc = c + 1; cc <= Math.min(c + 3, range.e.c); cc++) {
-            pVal = getCellValue(ws, r, cc);
-            if (pVal) break;
-          }
-        }
+        if (!pVal) pVal = getNextCellValue(ws, r, c, range.e.c);
         supplierPhone = pVal;
       }
     }
   }
 
-  // Parse delivery terms (rows after data)
+  // ── Step 5: Parse delivery terms ───────────────────────────────────
   let deliveryText = '';
   for (let r = headerRow + 1; r <= range.e.r; r++) {
     const v = getCellValue(ws, r, range.s.c) || getCellValue(ws, r, range.s.c + 1);
-    if (v.match(/^\d+[\.\s].*年.*月.*日.*交货/)) {
-      deliveryText = v;
-      break;
-    }
+    if (v.match(/^\d+[\.\s].*年.*月.*日.*交货/)) { deliveryText = v; break; }
   }
 
-  // Parse items
-  const items = [];
-  // Find column mapping from header row
+  // ── Step 6: Map columns from header row ────────────────────────────
   const colMap = {};
   for (let c = range.s.c; c <= range.e.c; c++) {
     const h = getCellValue(ws, headerRow, c);
-    if (h.includes('序号')) colMap.seq = c;
-    if (h.includes('模具名称') || h.includes('手办名称')) colMap.name = c;
-    if (h.includes('入水方式') || h.includes('性质')) colMap.gate = c;
-    if (h.includes('产品材料')) colMap.material = c;
-    if (h.includes('模具材料')) colMap.mold_material = c;
-    if (h.includes('穴数') || h.includes('套数')) colMap.cav_up = c;
-    if (h === '数量') colMap.quantity = c;
+    if (!h) continue;
+    if (h.includes('序号') || h.match(/^No\.?$/i) || h.match(/Item\s*No/i)) colMap.seq = c;
+    // Name column (various labels)
+    if (h.match(/模具名称|零件名称|手办名称|产品名称|项目内容|^名称$/) || (h.includes('货名') && !colMap.name)) colMap.name = c;
+    // Gate/nature/process column
+    if (h.match(/入水方式|GATE|性质|加工工艺|工序|规格材质|^规格$/)) colMap.gate = c;
+    // Material
+    if (h.match(/产品材料|^材料$|^胶料$/)) colMap.material = c;
+    if (h.match(/模具材料|工模材质/)) colMap.mold_material = c;
+    // Cav/up
+    if (h.match(/穴数|套数|CAV/i)) colMap.cav_up = c;
+    // Mold size
+    if (h.includes('工模尺寸')) colMap.mold_size = c;
+    // Quantity & unit
+    if (h === '数量' || h.match(/^Qty$/i)) colMap.quantity = c;
     if (h === '单位') colMap.unit = c;
-    if (h.includes('单价')) colMap.unit_price = c;
-    if (h.includes('金额') || h.includes('金 额')) colMap.amount = c;
-    if (h.includes('备') && h.includes('注')) colMap.notes = c;
+    // Unit price (pick the tax-inclusive one if multiple)
+    if (h.match(/单价/) && !h.includes('未含税')) colMap.unit_price = c;
+    if (h.match(/单价.*含.*税/) && colMap.unit_price) colMap.unit_price = c; // prefer tax-inclusive
+    if (h.match(/^Unit\s*Price$/i)) colMap.unit_price = c;
+    // Amount
+    if (h.match(/金额|金\s*额|Total|合计/i) && !colMap.amount) colMap.amount = c;
+    // Notes & image
+    if (h.match(/备.*注|^备注$|Remark/i)) colMap.notes = c;
     if (h.includes('图片')) colMap.image = c;
   }
 
+  // ── Step 7: Parse data rows ────────────────────────────────────────
+  const items = [];
   for (let r = headerRow + 1; r <= range.e.r; r++) {
-    const seqVal = getCellValue(ws, r, colMap.seq || range.s.c);
-    const nameVal = getCellValue(ws, r, colMap.name);
-    const amountVal = getCellValue(ws, r, colMap.amount);
+    const seqVal = getCellValue(ws, r, colMap.seq !== undefined ? colMap.seq : range.s.c);
+    const nameVal = colMap.name !== undefined ? getCellValue(ws, r, colMap.name) : '';
+    const amountStr = colMap.amount !== undefined ? getCellValue(ws, r, colMap.amount) : '';
 
-    // Stop at total row
-    if (amountVal && getCellValue(ws, r, (colMap.amount || 7) - 1).includes('合计')) break;
+    // Stop at total/合计 row
     if (seqVal.includes('合计') || nameVal.includes('合计')) break;
+    if (colMap.amount !== undefined) {
+      // Check cell to the left of amount for "合计"
+      let isTotal = false;
+      for (let cc = Math.max(range.s.c, colMap.amount - 2); cc < colMap.amount; cc++) {
+        if (getCellValue(ws, r, cc).includes('合计')) { isTotal = true; break; }
+      }
+      if (isTotal) break;
+    }
 
-    // Check if row has any meaningful data (amount, gate/nature, quantity)
-    const gateVal = getCellValue(ws, r, colMap.gate);
-    const qtyVal = getCellValue(ws, r, colMap.quantity);
-    const hasData = seqVal || nameVal || (amountVal && Number(amountVal)) || gateVal || (qtyVal && Number(qtyVal));
-
-    // Skip truly empty rows
+    // Check meaningful data — must have a name or a non-zero amount
+    const gateVal = colMap.gate !== undefined ? getCellValue(ws, r, colMap.gate) : '';
+    // Stop at footer rows (签核、确认、付款条件 etc.)
+    const rowText = seqVal + nameVal + gateVal;
+    if (rowText.match(/采购签核|确认签核|付款条件|付款方式/)) break;
+    const qtyVal = colMap.quantity !== undefined ? getCellValue(ws, r, colMap.quantity) : '';
+    const amountNum = Number(amountStr) || 0;
+    const hasName = nameVal && !nameVal.match(/^[：:．.、\s]+$/) && !nameVal.includes('签核') && !nameVal.includes('确认');
+    const hasData = hasName || amountNum > 0 || (qtyVal && Number(qtyVal) > 0);
     if (!hasData) continue;
 
     if (poType === 'mold') {
       items.push({
         part_name: nameVal,
-        material: getCellValue(ws, r, colMap.material),
-        gate: getCellValue(ws, r, colMap.gate),
-        cav_up: getCellValue(ws, r, colMap.cav_up),
-        unit_price: Number(getCellValue(ws, r, colMap.unit_price)) || 0,
-        amount: Number(getCellValue(ws, r, colMap.amount)) || 0,
-        notes: getCellValue(ws, r, colMap.notes)
+        material: colMap.material !== undefined ? getCellValue(ws, r, colMap.material) : '',
+        gate: gateVal,
+        cav_up: colMap.cav_up !== undefined ? getCellValue(ws, r, colMap.cav_up) : '',
+        unit_price: Number(colMap.unit_price !== undefined ? getCellValue(ws, r, colMap.unit_price) : 0) || 0,
+        amount: Number(amountStr) || 0,
+        notes: colMap.notes !== undefined ? getCellValue(ws, r, colMap.notes) : ''
       });
     } else {
       items.push({
         product_name: nameVal,
-        nature: getCellValue(ws, r, colMap.gate),
-        quantity: Number(getCellValue(ws, r, colMap.quantity)) || 0,
-        unit: getCellValue(ws, r, colMap.unit),
-        unit_price: Number(getCellValue(ws, r, colMap.unit_price)) || 0,
-        amount: Number(getCellValue(ws, r, colMap.amount)) || 0,
-        notes: getCellValue(ws, r, colMap.notes)
+        nature: gateVal,
+        quantity: Number(qtyVal) || 0,
+        unit: colMap.unit !== undefined ? getCellValue(ws, r, colMap.unit) : '',
+        unit_price: Number(colMap.unit !== undefined ? getCellValue(ws, r, colMap.unit_price) : 0) || 0,
+        amount: Number(amountStr) || 0,
+        notes: colMap.notes !== undefined ? getCellValue(ws, r, colMap.notes) : ''
       });
     }
+  }
+
+  // ── Detect group (车间) from sheet name or filename ──────────────
+  let group = '';
+  if (sheetName === 'B' || sheetName.match(/^B\d*$/)) group = 'B车间';
+  else if (sheetName.includes('兴信A') || sheetName === 'A' || sheetName.match(/^A\d*$/)) group = 'A车间';
+  else if (sheetName.includes('华登')) group = '华登车间';
+  // Fallback: check filename for A/B suffix (e.g. "20250102中尚B" → B车间)
+  if (!group) {
+    const fn = path.basename(filePath);
+    if (fn.match(/A\./i) || fn.match(/A$/)) group = 'A车间';
+    else if (fn.match(/B\./i) || fn.match(/B$/)) group = 'B车间';
   }
 
   return {
@@ -850,9 +975,20 @@ function parseExcelPO(filePath) {
     supplier_phone: supplierPhone,
     product_name: productName,
     customer: customer,
+    group: group,
+    order_date: orderDate,
     delivery_text: deliveryText,
     items: items
   };
+}
+
+// Helper: get non-empty value from next cells (for merged cell patterns)
+function getNextCellValue(ws, r, c, maxC) {
+  for (let cc = c + 1; cc <= Math.min(c + 3, maxC); cc++) {
+    const v = getCellValue(ws, r, cc);
+    if (v) return v;
+  }
+  return '';
 }
 
 // Import Excel → preview parsed data
@@ -897,6 +1033,7 @@ app.post('/api/import-po/confirm', upload.single('file'), (req, res) => {
     const paymentType = req.body.payment_type || '';
     const customerOverride = req.body.customer || '';  // user-selected customer from frontend
     const today = new Date().toISOString().substring(0, 10);
+    const orderDate = req.body.order_date || parsed.order_date || today;
 
     // Create PO
     const po = {
@@ -942,7 +1079,7 @@ app.post('/api/import-po/confirm', upload.single('file'), (req, res) => {
         amount: totalAmount,
         image: '',
         mold_factory: matchedFactory || '',
-        order_date: today,
+        order_date: orderDate,
         mold_start_date: '',
         delivery_date: '',
         status: '已下单',
@@ -964,7 +1101,7 @@ app.post('/api/import-po/confirm', upload.single('file'), (req, res) => {
         quantity: totalQty,
         figure_fee: totalAmount,
         figure_factory: matchedFactory || '',
-        order_date: today,
+        order_date: orderDate,
         status: '已下单',
         payment_type: paymentType,
         notes: '导入自采购单 ' + po.po_number,

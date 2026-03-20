@@ -379,7 +379,16 @@
         <h5 class="modal-title"><i class="bi bi-file-earmark-arrow-up"></i> 批量导入采购单</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body" ondragover="event.preventDefault();" ondrop="event.preventDefault(); handleDrop(event);">
+        <div id="importDropzone" class="text-center py-5" style="border:3px dashed #ccc; border-radius:12px; cursor:pointer; background:#f8f9fa;"
+             onclick="document.getElementById('importFile').value=''; document.getElementById('importFile').click();"
+             ondragover="event.preventDefault(); this.style.borderColor='#198754'; this.style.background='#e8f5e9';"
+             ondragleave="this.style.borderColor='#ccc'; this.style.background='#f8f9fa';"
+             ondrop="event.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; handleDrop(event);">
+          <i class="bi bi-cloud-arrow-up" style="font-size:3rem; color:#198754;"></i>
+          <div class="mt-2" style="font-size:1.1rem; color:#555;">拖拽Excel文件到这里，或<span class="text-success fw-bold">点击选择文件</span></div>
+          <div class="text-muted small mt-1">支持 .xlsx / .xls，可同时选择多个文件</div>
+        </div>
         <div id="importLoading" class="text-center py-4" style="display:none">
           <div class="spinner-border text-primary"></div>
           <div class="mt-2">正在解析Excel文件... <span id="importProgress"></span></div>
@@ -398,6 +407,10 @@
               <label class="form-label mb-1">批量设置费用承担</label>
               <select class="form-select form-select-sm" id="imp-batch-payment" onchange="batchSetField('payment',this.value)"><option value="">--</option><option>客付</option><option>自付</option></select>
             </div>
+            <div class="col-auto">
+              <button class="btn btn-sm btn-outline-success" onclick="addMoreFiles()"><i class="bi bi-plus-circle"></i> 继续添加文件</button>
+              <input type="file" id="addMoreInput" accept=".xlsx,.xls" multiple style="display:none" onchange="handleAddMore(this)">
+            </div>
             <div class="col-auto ms-auto">
               <span class="badge bg-primary" id="imp-file-count"></span>
             </div>
@@ -408,11 +421,13 @@
                 <tr>
                   <th style="width:30px"><input type="checkbox" checked onchange="toggleAllImport(this)"></th>
                   <th>文件名</th>
+                  <th>类型</th>
                   <th>采购单号</th>
                   <th>供应商</th>
                   <th>产品</th>
                   <th>明细</th>
                   <th>金额</th>
+                  <th>日期</th>
                   <th>客户 *</th>
                   <th>车间 *</th>
                   <th>费用承担</th>
@@ -442,6 +457,7 @@
 
 <script src="vendor/bootstrap.bundle.min.js"></script>
 <script src="vendor/chart.umd.min.js"></script>
+<script src="vendor/chartjs-plugin-datalabels.min.js"></script>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="utils.js"></script>
 <script>
@@ -886,13 +902,33 @@ function renderCharts(stats) {
   if (pieChart) pieChart.destroy();
   var pieCtx = document.getElementById('pieChart').getContext('2d');
   var colors = ['#FF6384','#36A2EB','#FFCE56','#4BC0C0','#9966FF','#FF9F40','#C9CBCF','#7BC8A4'];
+  var pieData = stats.summary.map(function(s) { return s.total_fee; });
+  var pieTotal = pieData.reduce(function(a, b) { return a + b; }, 0);
+  var pieLabels = stats.summary.map(function(s, i) {
+    var pct = pieTotal ? (pieData[i] / pieTotal * 100).toFixed(1) : 0;
+    return s.name + ' ' + pct + '%';
+  });
   pieChart = new Chart(pieCtx, {
     type: 'pie',
     data: {
-      labels: stats.summary.map(function(s) { return s.name; }),
-      datasets: [{ data: stats.summary.map(function(s) { return s.total_fee; }), backgroundColor: colors.slice(0, stats.summary.length) }]
+      labels: pieLabels,
+      datasets: [{ data: pieData, backgroundColor: colors.slice(0, stats.summary.length) }]
     },
-    options: { responsive: true, plugins: { title: { display: true, text: '费用占比' } } }
+    options: {
+      responsive: true,
+      plugins: {
+        title: { display: true, text: '费用占比' },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              var pct = pieTotal ? (ctx.raw / pieTotal * 100).toFixed(1) : 0;
+              return ctx.label + ': ¥' + ctx.raw.toLocaleString();
+            }
+          }
+        },
+        datalabels: { display: false }
+      }
+    }
   });
 }
 
@@ -1023,7 +1059,31 @@ var pendingImportFile = null;
 
 function triggerImport() {
   document.getElementById('importFile').value = '';
-  document.getElementById('importFile').click();
+  // Show modal with dropzone first
+  document.getElementById('importDropzone').style.display = '';
+  document.getElementById('importLoading').style.display = 'none';
+  document.getElementById('importPreview').style.display = 'none';
+  document.getElementById('importError').style.display = 'none';
+  document.getElementById('importFooter').style.display = 'none';
+  new bootstrap.Modal(document.getElementById('importModal')).show();
+}
+
+function handleDrop(e) {
+  var files = e.dataTransfer.files;
+  if (!files || !files.length) return;
+  var excelFiles = [];
+  for (var i = 0; i < files.length; i++) {
+    if (files[i].name.match(/\.xlsx?$/i)) excelFiles.push(files[i]);
+  }
+  if (!excelFiles.length) { showToast('请拖入 .xlsx 或 .xls 文件', 'danger'); return; }
+  // If already have files parsed, append; otherwise start fresh
+  if (batchFiles.length > 0 && document.getElementById('importPreview').style.display !== 'none') {
+    // Simulate addMore
+    var fakeInput = { files: excelFiles };
+    handleAddMore(fakeInput);
+  } else {
+    startBatchParse(excelFiles);
+  }
 }
 
 // ─── Batch Import ────────────────────────────────────────────────────
@@ -1032,16 +1092,27 @@ var customerListCache = [];
 
 function importExcel(input) {
   if (!input.files || !input.files.length) return;
+  var files = [];
+  for (var i = 0; i < input.files.length; i++) files.push(input.files[i]);
+  startBatchParse(files);
+}
+
+function startBatchParse(files) {
   batchFiles = [];
-  for (var i = 0; i < input.files.length; i++) {
-    batchFiles.push({ file: input.files[i], parsed: null, status: 'pending' });
+  for (var i = 0; i < files.length; i++) {
+    batchFiles.push({ file: files[i], parsed: null, status: 'pending' });
   }
 
+  document.getElementById('importDropzone').style.display = 'none';
   document.getElementById('importLoading').style.display = '';
   document.getElementById('importPreview').style.display = 'none';
   document.getElementById('importError').style.display = 'none';
   document.getElementById('importFooter').style.display = 'none';
-  new bootstrap.Modal(document.getElementById('importModal')).show();
+
+  // If modal not open yet (from file input click), open it
+  if (!bootstrap.Modal.getInstance(document.getElementById('importModal'))) {
+    new bootstrap.Modal(document.getElementById('importModal')).show();
+  }
 
   // Load customer list first, then parse all files
   authFetch('/api/customers').then(function(r) { return r.json(); }).then(function(custs) {
@@ -1091,7 +1162,7 @@ function renderBatchTable() {
 
   batchFiles.forEach(function(item, i) {
     if (item.status === 'error') {
-      html += '<tr class="table-danger"><td><input type="checkbox" disabled></td><td colspan="9">' + esc(item.file.name) + '</td><td><span class="text-danger">' + esc(item.error) + '</span></td></tr>';
+      html += '<tr class="table-danger"><td><input type="checkbox" disabled></td><td colspan="11">' + esc(item.file.name) + '</td><td><span class="text-danger">' + esc(item.error) + '</span></td></tr>';
       return;
     }
     var p = item.parsed;
@@ -1104,14 +1175,23 @@ function renderBatchTable() {
     }
     custHtml += '</select>';
 
+    var dateVal = p.order_date || '';
+    // Fallback: extract date from filename (e.g. "20250109手提包工模.xlsx" → 2025-01-09)
+    if (!dateVal) {
+      var fnMatch = item.file.name.match(/^(\d{4})(\d{2})(\d{2})/);
+      if (fnMatch) { var y=Number(fnMatch[1]),m=Number(fnMatch[2]),d=Number(fnMatch[3]); if(y>=2020&&y<=2030&&m>=1&&m<=12&&d>=1&&d<=31) dateVal=fnMatch[1]+'-'+fnMatch[2]+'-'+fnMatch[3]; }
+    }
+    var typeBadge = p.type === 'mold' ? '<span class="badge bg-primary">模具</span>' : '<span class="badge bg-success">手办</span>';
     html += '<tr data-idx="' + i + '">' +
       '<td><input type="checkbox" class="imp-row-check" checked></td>' +
       '<td><small>' + esc(item.file.name) + '</small></td>' +
+      '<td>' + typeBadge + '</td>' +
       '<td>' + esc(p.po_number) + '</td>' +
       '<td>' + esc(p.supplier_name) + '</td>' +
       '<td>' + esc(p.product_name) + '</td>' +
       '<td>' + p.items.length + '项</td>' +
       '<td>¥' + total.toLocaleString() + '</td>' +
+      '<td><input type="date" class="form-control form-control-sm imp-row-date" data-idx="' + i + '" value="' + dateVal + '"></td>' +
       '<td>' + custHtml + '</td>' +
       '<td><select class="form-select form-select-sm imp-row-group" data-idx="' + i + '"><option value="">请选择</option><option>A车间</option><option>B车间</option><option>华登车间</option></select></td>' +
       '<td><select class="form-select form-select-sm imp-row-payment" data-idx="' + i + '"><option value="">--</option><option>客付</option><option>自付</option></select></td>' +
@@ -1121,12 +1201,64 @@ function renderBatchTable() {
   document.getElementById('impBatchBody').innerHTML = html;
   document.getElementById('imp-file-count').textContent = batchFiles.filter(function(f) { return f.status === 'ready'; }).length + ' 个文件已识别';
 
-  // Auto-select parsed customer values
+  // Auto-select parsed customer and group values
   batchFiles.forEach(function(item, i) {
-    if (item.parsed && item.parsed.customer) {
-      var sel = document.querySelector('.imp-row-customer[data-idx="' + i + '"]');
-      if (sel) sel.value = item.parsed.customer;
+    if (!item.parsed) return;
+    // Auto-select customer
+    if (item.parsed.customer) {
+      var custSel = document.querySelector('.imp-row-customer[data-idx="' + i + '"]');
+      if (custSel) custSel.value = item.parsed.customer;
     }
+    // Auto-select group: from parsed data or filename
+    var grp = item.parsed.group || '';
+    if (!grp) {
+      var fn = item.file.name;
+      if (fn.match(/A[.\s\-_]|A$/i) && fn.match(/[^a-zA-Z]A[.\s\-_]|[^a-zA-Z]A$/)) grp = 'A车间';
+      else if (fn.match(/B[.\s\-_]|B$/i) && fn.match(/[^a-zA-Z]B[.\s\-_]|[^a-zA-Z]B$/)) grp = 'B车间';
+    }
+    if (grp) {
+      var grpSel = document.querySelector('.imp-row-group[data-idx="' + i + '"]');
+      if (grpSel) grpSel.value = grp;
+    }
+  });
+}
+
+function addMoreFiles() {
+  document.getElementById('addMoreInput').value = '';
+  document.getElementById('addMoreInput').click();
+}
+
+function handleAddMore(input) {
+  if (!input.files || !input.files.length) return;
+  var newFiles = [];
+  for (var i = 0; i < input.files.length; i++) {
+    newFiles.push({ file: input.files[i], parsed: null, status: 'pending' });
+  }
+  var startIdx = batchFiles.length;
+  batchFiles = batchFiles.concat(newFiles);
+
+  // Parse only new files
+  document.getElementById('importLoading').style.display = '';
+  var chain = Promise.resolve();
+  newFiles.forEach(function(item, i) {
+    chain = chain.then(function() {
+      document.getElementById('importProgress').textContent = (i + 1) + '/' + newFiles.length;
+      var formData = new FormData();
+      formData.append('file', item.file);
+      return authFetch('/api/import-po/preview', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + getToken() },
+        body: formData
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(result) {
+          if (result.ok) { item.parsed = result.data; item.status = 'ready'; }
+          else { item.status = 'error'; item.error = result.data.error; }
+        }).catch(function(e) { item.status = 'error'; item.error = e.message; });
+    });
+  });
+  chain.then(function() {
+    document.getElementById('importLoading').style.display = 'none';
+    renderBatchTable();
   });
 }
 
@@ -1150,12 +1282,17 @@ function confirmBatchImport() {
     if (!cb || !cb.checked) return;
     var item = batchFiles[idx];
     if (item.status !== 'ready') return;
-    var customer = row.querySelector('.imp-row-customer').value;
-    var group = row.querySelector('.imp-row-group').value;
-    var payment = row.querySelector('.imp-row-payment').value;
+    var custEl = row.querySelector('.imp-row-customer');
+    var groupEl = row.querySelector('.imp-row-group');
+    var payEl = row.querySelector('.imp-row-payment');
+    var dateEl = row.querySelector('.imp-row-date');
+    var customer = custEl ? custEl.value : '';
+    var group = groupEl ? groupEl.value : '';
+    var payment = payEl ? payEl.value : '';
+    var orderDate = dateEl ? dateEl.value : '';
     if (!customer) { errors.push(item.file.name + ': 请选择客户'); return; }
     if (!group) { errors.push(item.file.name + ': 请选择车间'); return; }
-    toImport.push({ idx: idx, file: item.file, customer: customer, group: group, payment: payment });
+    toImport.push({ idx: idx, file: item.file, customer: customer, group: group, payment: payment, order_date: orderDate });
   });
 
   if (errors.length) { showToast(errors[0], 'danger'); return; }
@@ -1172,6 +1309,7 @@ function confirmBatchImport() {
       formData.append('group', task.group);
       formData.append('customer', task.customer);
       formData.append('payment_type', task.payment);
+      formData.append('order_date', task.order_date);
       return authFetch('/api/import-po/confirm', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + getToken() },
