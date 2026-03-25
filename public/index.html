@@ -31,10 +31,8 @@
 
 <script src="vendor/bootstrap.bundle.min.js"></script>
 <script>
-// If already logged in, redirect
-if (sessionStorage.getItem('token')) {
-  window.location.href = 'mold.html';
-}
+// Skip login, go directly to main page
+window.location.href = 'mold.html';
 
 document.getElementById('loginPin').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') doLogin();

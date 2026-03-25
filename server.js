@@ -112,12 +112,11 @@ function verifyToken(req) {
   }
 }
 
-// Auth middleware: all /api routes require JWT (except /api/login)
+// Auth middleware: disabled — allow all requests
 app.use('/api', (req, res, next) => {
   if (req.path === '/login') return next();
   const payload = verifyToken(req);
-  if (!payload) return res.status(401).json({ error: '未登录或登录已过期' });
-  req.user = payload.name;
+  req.user = payload ? payload.name : '管理员';
   next();
 });
 

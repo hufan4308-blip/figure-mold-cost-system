@@ -7,24 +7,14 @@ function getToken() { return sessionStorage.getItem('token') || ''; }
 function authHeaders() {
   return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getToken() };
 }
-function authCheck() {
-  if (!getToken()) { window.location.href = 'index.html'; return false; }
-  return true;
-}
-function logout() {
-  sessionStorage.removeItem('user');
-  sessionStorage.removeItem('token');
-  window.location.href = 'index.html';
-}
-// Wrapper for fetch that auto-redirects on 401
+function authCheck() { return true; }
+function logout() { window.location.href = 'index.html'; }
+// Wrapper for fetch
 function authFetch(url, opts) {
   opts = opts || {};
   if (!opts.headers) opts.headers = {};
   if (!opts.headers['Authorization']) opts.headers['Authorization'] = 'Bearer ' + getToken();
-  return fetch(url, opts).then(function(r) {
-    if (r.status === 401) { logout(); throw new Error('登录已过期'); }
-    return r;
-  });
+  return fetch(url, opts);
 }
 
 function fmtDate(s) {
